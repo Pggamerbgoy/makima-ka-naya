@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Caches & temporary files
+.uv-cache/
+.kilo/
+.claude-flow/
+.ruff_cache/
+.pytest_cache/
+.swarm/
+
+# Agent scratchpads (preserve project rules and skills)
+.agents/*
+!.agents/rules/
+!.agents/skills/
+
+# Test reports & traces
+playwright-report/
+test-results/
+
+# Production build maps
+dist/*.map

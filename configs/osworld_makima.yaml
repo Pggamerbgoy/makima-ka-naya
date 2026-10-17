@@ -1,0 +1,22 @@
+# OSWorld harness settings. The model backend is deliberately not the agent name.
+agent:
+  name: Makima
+  task_cascade: osworld
+  max_turns: 15
+  session_prefix: osworld
+
+backend:
+  # Informational only; Makima's normal router chooses the active provider.
+  role: reasoning_backend
+
+daytona:
+  enabled: true
+  # Requires DAYTONA_API_KEY plus the OSWorld VM/GUI bridge.
+  create_sandbox: true
+  command_timeout_seconds: 30
+  max_steps: 15
+
+results:
+  benchmark_name: "Run Continuous"
+  runtime: "Daytona"
+  directory: results/run-continuous/makima

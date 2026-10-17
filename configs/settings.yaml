@@ -1,0 +1,308 @@
+# ==============================================================================
+# Makima v2 — Dynamic System Configuration
+# ==============================================================================
+
+app:
+  name: "Makima"
+  version: "2.0.0"
+  env: "development"
+  data_dir: "~/.makima"
+  log_level: "INFO"
+
+# ------------------------------------------------------------------------------
+# 1. Model Providers & Zero-Cost Pareto Routing
+# ------------------------------------------------------------------------------
+providers:
+  default: "auto" # "auto" uses ParetoRouter to pick optimal active model
+  circuit_breaker:
+    max_failures: 3
+    cooldown_seconds: 30
+    jitter: true
+
+  # Task Cascades: Free tiers prioritized
+  cascades:
+    fast_chat: ["gemini", "groq", "openrouter_free", "ollama"]
+    code: ["ollama", "groq", "openrouter_free", "gemini"]
+    deep_reasoning: ["gemini", "openrouter_free", "ollama"]
+    vision: ["gemini", "alibaba_qwen_vl_plus"]
+    voice: ["gemini_live"]
+    offline: ["ollama"]
+    # OSWorld evaluates Makima end-to-end with Alibaba Cloud as its reasoning backend.
+    osworld: [
+      "alibaba_qwen_37_plus",
+      "alibaba_glm_52",
+      "alibaba_qwen_38_moe",
+      "alibaba_qwen_37_flash",
+      "alibaba_kimi_k27",
+      "alibaba_deepseek_v4_flash",
+      "alibaba_qwen_coder_flash",
+      "alibaba_glm_53",
+      "alibaba_qwen_vl_plus_snapshot",
+      "alibaba_qwen_vl_plus",
+      "alibaba_qwen_vl_flash_snapshot",
+      "alibaba_qwen_max",
+      "alibaba_qwen_max_37",
+      "alibaba_qwen_plus_37",
+      "alibaba_qwen_plus_36",
+      "alibaba_qwen_plus",
+    ]
+
+  backends:
+    alibaba_qwen_37_plus:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.7-plus-2026-05-26"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_glm_52:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "glm-5.2"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_37_flash:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.7-flash-2026-07-15"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_kimi_k27:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "kimi-k2.7-code"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_deepseek_v4_flash:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "deepseek-v4-flash-0731"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_38_moe:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.8-2.4t-a95b"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_coder_flash:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3-coder-flash"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_glm_53:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "glm-5.3"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_vl_plus_snapshot:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3-vl-plus-2025-12-19"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_vl_plus:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3-vl-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_vl_flash_snapshot:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3-vl-flash-2025-10-15"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_max:
+      adapter: "openai"
+      # International/Singapore DashScope API key endpoint.
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.8-max"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_max_37:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.7-max"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_plus_37:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.7-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_plus_36:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.6-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_plus:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    gemini:
+      adapter: "gemini"
+      model: "gemini-2.5-flash"
+      api_key_env: "GEMINI_API_KEY"
+      latency_tier: "fast"
+      context_limit: 1000000
+
+    groq:
+      adapter: "openai"
+      base_url: "https://api.groq.com/openai/v1"
+      model: "llama-3.3-70b-versatile"
+      api_key_env: "GROQ_API_KEY"
+      latency_tier: "fast"
+      context_limit: 128000
+
+    ollama:
+      adapter: "ollama"
+      base_url: "http://localhost:11434"
+      model: "qwen2.5-coder:7b"
+      latency_tier: "standard"
+      context_limit: 32768
+
+    openrouter_free:
+      adapter: "openai"
+      base_url: "https://openrouter.ai/api/v1"
+      model: "meta-llama/llama-3.3-70b-instruct:free"
+      api_key_env: "OPENROUTER_API_KEY"
+      latency_tier: "standard"
+      context_limit: 64000
+
+# ------------------------------------------------------------------------------
+# 2. Multi-Platform Messaging Gateway Daemon
+# ------------------------------------------------------------------------------
+gateway:
+  enabled: true
+  host: "127.0.0.1"
+  port: 8080
+  security:
+    allow_all_users: false # When false, only allowlisted users can command agent
+    allowlist_user_ids: []
+    pairing_code_enabled: true
+
+  platforms:
+    telegram:
+      enabled: false
+      token_env: "TELEGRAM_BOT_TOKEN"
+      require_mention_in_groups: true
+
+    discord:
+      enabled: false
+      token_env: "DISCORD_BOT_TOKEN"
+      voice_enabled: true
+
+    whatsapp:
+      enabled: false
+      session_dir: "~/.makima/whatsapp_session"
+
+# ------------------------------------------------------------------------------
+# 3. Memory & Self-Improving Skills
+# ------------------------------------------------------------------------------
+memory:
+  state_dir: "~/.makima/state"
+  sqlite_path: "~/.makima/state/history.db"
+  fts_enabled: true
+  vector_search:
+    enabled: true
+    embedding_model: "BAAI/bge-small-en-v1.5"
+
+skills:
+  directory: "~/.makima/skills"
+  auto_synthesize: true
+
+# ------------------------------------------------------------------------------
+# 4. OS & Tool Sandbox
+# ------------------------------------------------------------------------------
+tools:
+  sandbox:
+    mode: "local_clamped" # "local_clamped" or "docker"
+    workspace_dir: "~/.makima/workspace"
+    command_timeout_seconds: 45
+    block_dangerous_commands: true
+
+  browser:
+    headless: false # False allows visible browser window on user desktop
+    stealth: true
+    cdp_endpoint: "http://localhost:9222"
+
+  concurrency:
+    enabled: true
+    max_concurrency: 8
+    parallel_safe_tags:
+      - "search"
+      - "read"
+      - "info"
+      - "system_info"
+      - "stats"
+      - "telemetry"
+      - "web"
+      - "internet"
+      - "research"
+      - "query"
+      - "memory"
+      - "filesystem_read"
+    mutating_tags:
+      - "desktop"
+      - "input"
+      - "write"
+      - "delete"
+      - "control"
+      - "exec"
+      - "terminal"
+      - "kill"
+      - "window"
+      - "mouse"
+      - "keyboard"
+      - "uia"
+      - "mutating"
+
+# ------------------------------------------------------------------------------
+# 5. Multimodal Voice (Gemini 3.8 Live Bidirectional Audio — Zero TTS)
+# ------------------------------------------------------------------------------
+voice:
+  engine: "gemini_live" # Native Gemini 3.8 Live bidirectional voice
+  model: "gemini-3.8-live"
+  voice_name: "Aoede" # Options: Aoede, Charon, Fenrir, Kore, Puck
+  sounddevice:
+    input_sample_rate: 16000 # 16kHz PCM input for Gemini Live
+    output_sample_rate: 24000 # 24kHz PCM output from Gemini Live
+    channels: 1
