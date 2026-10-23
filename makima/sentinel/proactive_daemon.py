@@ -177,10 +177,10 @@ def _check_habit_window(habits: List[Dict[str, Any]], now: datetime) -> Optional
 
 def _build_suggestion(trigger_type: str, context: Dict[str, Any]) -> str:
     """
-    Builds a suggestion message by calling Makima brain HTTP endpoint.
+    Builds a suggestion message by calling Makima brain HTTP endpoint via shared connection pool.
     Falls back to a default message if brain is unavailable.
     """
-    import httpx
+    from makima.core.http_pool import get_shared_sync_client
 
     app_label = context.get("app_label", context.get("active_process", "your app"))
     habit_label = context.get("habit_label", "your routine")
@@ -205,18 +205,18 @@ def _build_suggestion(trigger_type: str, context: Dict[str, Any]) -> str:
             "user_id": "sentinel_daemon",
             "session_id": "proactive",
         }
-        with httpx.Client(timeout=BRAIN_TIMEOUT_S) as client:
-            resp = client.post(f"{BRAIN_URL}/api/chat", json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                suggestion = (
-                    data.get("response")
-                    or data.get("message")
-                    or data.get("content")
-                    or ""
-                ).strip()
-                if suggestion and len(suggestion) > 5:
-                    return suggestion
+        client = get_shared_sync_client()
+        resp = client.post(f"{BRAIN_URL}/api/chat", json=payload, timeout=BRAIN_TIMEOUT_S)
+        if resp.status_code == 200:
+            data = resp.json()
+            suggestion = (
+                data.get("response")
+                or data.get("message")
+                or data.get("content")
+                or ""
+            ).strip()
+            if suggestion and len(suggestion) > 5:
+                return suggestion
     except Exception as exc:
         logger.debug("Brain call failed (using default): %s", exc)
 

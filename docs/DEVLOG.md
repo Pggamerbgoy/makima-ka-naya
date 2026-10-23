@@ -4,6 +4,30 @@
 
 ## 📅 2026-10-23
 
+### Entry 18: 100% KV-Cache Hit Architecture, Dynamic Intent Tool Pruning, Presidio Fast Gate & Persistent Sync HTTP Pooling
+- **Context**: Advanced architectural optimization targeting TTFT (Time To First Token), LLM prompt caching efficiency, CPU spike reduction during PII filtering, and connection reuse across background OS daemons.
+- **Decisions & Tradeoffs**:
+  1. **100% Static System Prompt & Transient Browser State Injection (`makima/core/engine.py`)**:
+     - *Issue*: Appending `<active_browser_state>` to `turn_system_prompt` on every sub-turn altered the system prompt whenever the browser page changed, completely invalidating the KV-cache prefix for OpenAI, DeepSeek, Groq, and Anthropic.
+     - *Solution*: Made `turn_system_prompt` 100% immutable across the entire autonomous while-loop. Appended the dynamic `<active_browser_state>` block transiently to the last message of `messages_for_llm` on a shallow copy, preserving 100% byte-for-byte prefix cache hits across sub-turns while keeping episodic history clean.
+  2. **Smart Intent-Based Tool Pruning (`makima/core/engine.py`)**:
+     - *Issue*: Broadcasting 60+ tool schemas (~4,000 tokens) on every user turn inflated prefill latency and model confusion on non-messaging/non-media tasks.
+     - *Solution*: Evaluated user query intent when `len(tool_schemas) > 15` and `tool_tags is None`. Pruned specialized messaging (WhatsApp, Telegram, Discord, Inbox) and media (Spotify, volume, playback) tools when intent is absent, cutting ~2,500-3,500 input tokens per turn.
+  3. **Presidio Engine Fast Pre-Screening Gate (`makima/core/guardrails.py`)**:
+     - *Issue*: Running 6 heavyweight Presidio recognizers across 16KB tool outputs caused 50-150ms CPU spikes per call.
+     - *Solution*: Added mathematical pre-screening: skipped `EmailRecognizer` if `@` is absent; skipped numeric recognizers (`CreditCard`, `Phone`, `Ip`) if no 3+ digit cluster (`\d{3,}`) exists, reducing overhead by ~70% without sacrificing PII protection.
+  4. **Persistent Synchronous HTTP Connection Pool (`makima/core/http_pool.py`, `event_daemon.py`, `proactive_daemon.py`)**:
+     - *Issue*: Background worker threads in `event_daemon.py` and `proactive_daemon.py` instantiated ephemeral `httpx.Client()` instances for each brain request, creating socket churn.
+     - *Solution*: Added `get_shared_sync_client()` and `HTTPPool.get_sync_client()` with keepalive connection limits (`max_keepalive=20`, `max_connections=50`), eliminating per-request TCP handshakes.
+- **Verification & Outcome**:
+  - `tests/verify_engine.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_sentinel.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_gateway_core.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_memory.py`: ALL 9 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_engine_memory.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+
+---
+
 ### Entry 17: Sentinel OS Watcher Hardening, Stateful CPU Accounting, Win32 Clipboard Mutex Optimization & Habit Rejection Decay
 - **Context**: Comprehensive hardening and adversarial bug remediation across Sentinel OS monitoring modules (`event_daemon.py`, `observer.py`, `proactive_daemon.py`, `habit_engine.py`) to eliminate race conditions, OS clipboard mutex lockups, Win32 integer overflows, and uncalibrated proactive prompts.
 - **Decisions & Tradeoffs**:

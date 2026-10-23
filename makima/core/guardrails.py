@@ -232,11 +232,20 @@ class Guardrails:
 
         result = text
 
-        # 1. Microsoft Presidio PII anonymization (Credit Cards, Emails, Phones, Crypto, IPs, IBANs)
+        # 1. Microsoft Presidio PII anonymization with Fast Pre-Screening Gate
         if self._presidio_anonymizer and self._presidio_recognizers:
             try:
+                has_at = "@" in result
+                has_digits = bool(re.search(r"\d{3,}", result))
                 all_pii = []
                 for r in self._presidio_recognizers:
+                    r_name = type(r).__name__
+                    # Fast Pre-Screening: Skip EmailRecognizer if no '@' present
+                    if "Email" in r_name and not has_at:
+                        continue
+                    # Fast Pre-Screening: Skip numeric-heavy recognizers if no 3+ digit clusters exist
+                    if any(k in r_name for k in ("CreditCard", "Phone", "Ip")) and not has_digits:
+                        continue
                     res = r.analyze(text=result, entities=r.supported_entities)
                     if res:
                         all_pii.extend(res)

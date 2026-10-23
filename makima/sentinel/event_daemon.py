@@ -1038,18 +1038,18 @@ class SentinelEventDaemon:
         threading.Thread(target=_runner, daemon=True).start()
 
     def _dispatch_brain_task(self, prompt: str) -> None:
-        """Dispatches an autonomous background request to Makima's HTTP endpoint."""
+        """Dispatches an autonomous background request to Makima's HTTP endpoint via shared connection pool."""
         def _call():
             try:
-                import httpx
+                from makima.core.http_pool import get_shared_sync_client
                 payload = {
                     "prompt": prompt,
                     "message": prompt,
                     "user_id": "listening_devil",
                     "session_id": "sentinel_auto_fix",
                 }
-                with httpx.Client(timeout=15.0) as client:
-                    client.post(f"{BRAIN_URL}/api/chat", json=payload)
+                client = get_shared_sync_client()
+                client.post(f"{BRAIN_URL}/api/chat", json=payload, timeout=15.0)
             except Exception as exc:
                 logger.debug("Listening Devil brain handoff notice: %s", exc)
 

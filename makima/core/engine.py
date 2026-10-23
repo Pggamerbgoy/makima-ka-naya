@@ -691,6 +691,28 @@ class HermesAgentEngine:
             if is_trivial_greeting and len(tool_schemas) > 20:
                 tool_schemas = None
             else:
+                # Smart Intent-Based Tool Pruning (cuts ~3000 tokens per turn when specialized tools aren't needed)
+                if len(tool_schemas) > 15 and tool_tags is None:
+                    user_text = prompt or (working_messages[-1].content if working_messages and working_messages[-1].role == "user" else "")
+                    if user_text:
+                        q_low = user_text.lower()
+                        needs_messaging = any(k in q_low for k in ("whatsapp", "telegram", "discord", "email", "mail", "inbox", "message", "send", "bhej", "dm", "chat"))
+                        needs_media = any(k in q_low for k in ("spotify", "music", "song", "gaana", "volume", "sound", "play", "pause", "track", "audio"))
+                        
+                        filtered_schemas = []
+                        for s in tool_schemas:
+                            fn_name = (
+                                s.get("function", {}).get("name", "")
+                                if isinstance(s.get("function"), dict)
+                                else s.get("name", "")
+                            ).lower()
+                            if not needs_messaging and any(m in fn_name for m in ("whatsapp", "telegram", "discord", "inbox")):
+                                continue
+                            if not needs_media and any(m in fn_name for m in ("spotify", "media", "volume", "play_song")):
+                                continue
+                            filtered_schemas.append(s)
+                        tool_schemas = filtered_schemas
+
                 seen_names = set()
                 deduped_schemas = []
                 for schema in tool_schemas:
@@ -735,16 +757,14 @@ class HermesAgentEngine:
             turn += 1
             logger.debug(f"Starting Hermes engine turn {turn}/{limit_turns}")
 
-            # 0. Dynamically refresh active browser state on every sub-turn so it never goes stale
+            # 0. 100% Immutable System Prompt for Perfect KV-Cache Prefix Reuse
             turn_system_prompt = effective_system_prompt
+            browser_state_block = ""
             try:
                 from makima.tools.browser.automation import get_browser_controller
                 browser_summary = get_browser_controller().get_active_context_summary()
                 if browser_summary:
-                    turn_system_prompt = (
-                        f"{effective_system_prompt}\n\n---\n\n"
-                        f"<active_browser_state>\n{browser_summary}\n</active_browser_state>"
-                    )
+                    browser_state_block = f"\n\n<active_browser_state>\n{browser_summary}\n</active_browser_state>"
             except Exception:
                 pass
 
@@ -788,9 +808,23 @@ class HermesAgentEngine:
             # eliminating random token sampling drift. For pure conversational turns (no tools),
             # respect the requested temperature.
             turn_temperature = 0.0 if active_tools_for_turn else temperature
+
+            # Transiently attach active_browser_state to the very last message for KV-cache preservation
+            # (keeps permanent working_messages history untainted and system prompt prefix 100% static)
+            messages_for_llm = list(working_messages)
+            if browser_state_block and messages_for_llm:
+                last_m = messages_for_llm[-1]
+                messages_for_llm[-1] = Message(
+                    role=last_m.role,
+                    content=(last_m.content or "") + browser_state_block,
+                    name=getattr(last_m, "name", None),
+                    tool_call_id=getattr(last_m, "tool_call_id", None),
+                    tool_calls=getattr(last_m, "tool_calls", None),
+                )
+
             router_kwargs: Dict[str, Any] = {
                 "task": active_task,
-                "messages": working_messages,
+                "messages": messages_for_llm,
                 "system_prompt": turn_system_prompt,
                 "tools": active_tools_for_turn,
                 "temperature": turn_temperature,
