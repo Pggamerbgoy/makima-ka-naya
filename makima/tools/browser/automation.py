@@ -19,13 +19,25 @@ from makima.tools.registry import tool
 
 logger = logging.getLogger("makima.tools.browser.automation")
 
-try:
-    from playwright.async_api import Error as PlaywrightError, async_playwright
-    _PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PlaywrightError = Exception
-    async_playwright = None
-    _PLAYWRIGHT_AVAILABLE = False
+_PLAYWRIGHT_AVAILABLE: Optional[bool] = None
+PlaywrightError: Any = Exception
+async_playwright: Any = None
+
+
+def _load_playwright() -> bool:
+    """Lazy loader for Playwright to avoid 50MB RAM and 400ms startup latency."""
+    global _PLAYWRIGHT_AVAILABLE, PlaywrightError, async_playwright
+    if _PLAYWRIGHT_AVAILABLE is None:
+        try:
+            from playwright.async_api import Error as _PE, async_playwright as _AP
+            PlaywrightError = _PE
+            async_playwright = _AP
+            _PLAYWRIGHT_AVAILABLE = True
+        except ImportError:
+            PlaywrightError = Exception
+            async_playwright = None
+            _PLAYWRIGHT_AVAILABLE = False
+    return _PLAYWRIGHT_AVAILABLE
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -224,7 +236,7 @@ class BrowserController:
 
     async def ensure_page(self, headless: bool = False) -> Any:
         """Ensures an active browser page is open, launching if necessary."""
-        if not _PLAYWRIGHT_AVAILABLE or async_playwright is None:
+        if not _load_playwright() or async_playwright is None:
             raise RuntimeError("Playwright is not installed in the environment.")
 
         # Ensure lock belongs to current running event loop
@@ -815,8 +827,8 @@ class _ProactorBrowserProxy:
     async def click(self, index: Optional[int] = None, selector: Optional[str] = None, timeout_ms: int = 8000) -> Dict[str, Any]:
         return await self._bridge.run_coro(self._bridge.real_controller.click(index=index, selector=selector, timeout_ms=timeout_ms))
 
-    async def type_text(self, text: str, index: Optional[int] = None, selector: Optional[str] = None, press_enter: bool = False) -> Dict[str, Any]:
-        return await self._bridge.run_coro(self._bridge.real_controller.type_text(text=text, index=index, selector=selector, press_enter=press_enter))
+    async def type_text(self, text: str, index: Optional[int] = None, selector: Optional[str] = None, press_enter: bool = False, clear_first: bool = False) -> Dict[str, Any]:
+        return await self._bridge.run_coro(self._bridge.real_controller.type_text(text=text, index=index, selector=selector, press_enter=press_enter, clear_first=clear_first))
 
     async def press_key(self, key: str) -> Dict[str, Any]:
         return await self._bridge.run_coro(self._bridge.real_controller.press_key(key=key))
@@ -824,8 +836,9 @@ class _ProactorBrowserProxy:
     async def scroll(self, amount: int = 500) -> Dict[str, Any]:
         return await self._bridge.run_coro(self._bridge.real_controller.scroll(amount=amount))
 
-    async def screenshot(self, filename: Optional[str] = None) -> Dict[str, Any]:
-        return await self._bridge.run_coro(self._bridge.real_controller.screenshot(filename=filename))
+    async def screenshot(self, save_path: Optional[str] = None, filename: Optional[str] = None) -> Dict[str, Any]:
+        target = save_path or filename
+        return await self._bridge.run_coro(self._bridge.real_controller.screenshot(save_path=target))
 
     async def get_text(self, max_length: int = 15000, selector: Optional[str] = None) -> Dict[str, Any]:
         return await self._bridge.run_coro(self._bridge.real_controller.get_text(max_length=max_length, selector=selector))

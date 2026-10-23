@@ -80,13 +80,32 @@ def _element_to_dict(elem: Any, depth: int = 0) -> dict[str, Any]:
         except Exception:
             pass
 
+        # Check if element is a protected password field (UIA IsPassword)
+        is_pwd = False
+        try:
+            is_pwd = bool(getattr(info, "is_password", False))
+            if not is_pwd and hasattr(elem, "is_password"):
+                is_pwd = bool(elem.is_password())
+            if not is_pwd and (
+                "password" in str(ctl_type).lower()
+                or "password" in str(cls_name).lower()
+                or "password" in str(auto_id).lower()
+            ):
+                is_pwd = True
+        except Exception:
+            pass
+
+        # Protect password text from ever entering accessibility tree
+        clean_name = "[PROTECTED_PASSWORD]" if is_pwd else name.strip()
+
         return {
-            "name": name.strip(),
+            "name": clean_name,
             "control_type": str(ctl_type),
             "automation_id": str(auto_id).strip(),
             "class_name": str(cls_name).strip(),
             "enabled": is_enabled,
             "visible": is_visible,
+            "is_password": is_pwd,
             "rect": rect,
             "depth": depth,
         }

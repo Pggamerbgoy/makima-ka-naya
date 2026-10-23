@@ -322,16 +322,21 @@ class EmailAdapter(BaseAdapter):
         return results
 
     async def _poll_loop(self) -> None:
-        """Continuous background task checking for new emails."""
+        """Continuous background task checking for new emails with exponential backoff on errors."""
         logger.info(f"Email adapter started polling every {self.poll_interval}s...")
+        consecutive_errors = 0
         while not self._stopping:
             try:
                 await self.check_unseen_emails()
+                consecutive_errors = 0
+                sleep_s = self.poll_interval
             except Exception as e:
-                logger.error(f"Error in EmailAdapter poll loop: {e}", exc_info=True)
+                consecutive_errors += 1
+                sleep_s = min(self.poll_interval * (2 ** min(consecutive_errors, 5)), 300.0)
+                logger.warning(f"Error in EmailAdapter poll loop (backing off {sleep_s:.1f}s): {e}")
 
             try:
-                await asyncio.sleep(self.poll_interval)
+                await asyncio.sleep(sleep_s)
             except asyncio.CancelledError:
                 break
 

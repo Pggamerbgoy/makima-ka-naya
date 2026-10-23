@@ -121,6 +121,15 @@ class LiveVoiceController:
         if not self.session.is_active:
             await self.session.connect()
 
+        # Wire Sentinel live session dispatcher if active
+        try:
+            from makima.sentinel.event_daemon import get_sentinel_daemon
+            sentinel = get_sentinel_daemon()
+            if sentinel:
+                sentinel.set_live_dispatcher(self.session.send_text_prompt)
+        except Exception as _e:
+            logger.debug("Could not link Sentinel daemon to live voice controller: %s", _e)
+
         # 2. Start microphone input stream
         try:
             self._mic_stream = sd.InputStream(
@@ -158,6 +167,14 @@ class LiveVoiceController:
         if hasattr(self, "_tasks"):
             for t in self._tasks:
                 t.cancel()
+
+        try:
+            from makima.sentinel.event_daemon import get_sentinel_daemon
+            sentinel = get_sentinel_daemon()
+            if sentinel:
+                sentinel.set_live_dispatcher(None)
+        except Exception:
+            pass
 
         await self.session.close()
         logger.info("Gemini Live Voice Controller stopped.")

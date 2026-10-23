@@ -121,8 +121,7 @@ class EpisodicMemory:
                 await conn.execute(
                     """
                     CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
-                        turn_id UNINDEXED,
-                        session_id UNINDEXED,
+                        session_id,
                         role UNINDEXED,
                         content,
                         tokenize = 'porter unicode61'
@@ -250,13 +249,20 @@ class EpisodicMemory:
             # Synchronize FTS5 index
             if self.fts_enabled:
                 try:
-                    await conn.execute("DELETE FROM turns_fts WHERE turn_id = ?;", (turn_id,))
+                    await conn.execute("DELETE FROM turns_fts WHERE rowid = ?;", (turn_id,))
                     await conn.execute(
-                        "INSERT INTO turns_fts (turn_id, session_id, role, content) VALUES (?, ?, ?, ?);",
+                        "INSERT INTO turns_fts (rowid, session_id, role, content) VALUES (?, ?, ?, ?);",
                         (turn_id, session_id, role, content or ""),
                     )
-                except Exception as e:
-                    logger.debug(f"FTS indexing skipped: {e}")
+                except Exception:
+                    try:
+                        await conn.execute("DELETE FROM turns_fts WHERE turn_id = ?;", (turn_id,))
+                        await conn.execute(
+                            "INSERT INTO turns_fts (turn_id, session_id, role, content) VALUES (?, ?, ?, ?);",
+                            (turn_id, session_id, role, content or ""),
+                        )
+                    except Exception as e:
+                        logger.debug(f"FTS indexing skipped: {e}")
 
             await conn.commit()
             return turn_id
@@ -392,17 +398,18 @@ class EpisodicMemory:
         """
         conn = await self._get_conn()
 
-        tokens = re.findall(r"\w+", query)
+        fts_reserved = {"and", "or", "not", "near"}
+        tokens = [t for t in re.findall(r"\w+", query) if t.lower() not in fts_reserved]
         if not tokens:
             return []
 
         # If FTS is enabled, execute FTS5 MATCH
         if self.fts_enabled:
-            fts_query = " AND ".join(f'"{t}"*' for t in tokens)
+            fts_query = " AND ".join(f'"{t}"*' for t in tokens[:12])
             sql = """
                 SELECT c.id, c.session_id, c.turn_index, c.role, c.content, c.tool_calls, c.timestamp, c.metadata, fts.rank
                 FROM turns_fts fts
-                JOIN conversation_turns c ON c.id = fts.turn_id
+                JOIN conversation_turns c ON (c.id = fts.rowid)
                 WHERE turns_fts MATCH ?
             """
             params: List[Any] = [fts_query]

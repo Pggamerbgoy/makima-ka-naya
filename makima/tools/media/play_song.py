@@ -247,8 +247,20 @@ def _play_jiosaavn(query: str, auto_open: bool, browser: str | None = None) -> d
     }
 
 
+def _is_media_file(path: str) -> bool:
+    """Dynamically determines if a path points to audio/video via OS MIME registry."""
+    import mimetypes
+    mime, _ = mimetypes.guess_type(path)
+    return bool(mime and (mime.startswith("audio/") or mime.startswith("video/")))
+
+
 def _play_local_media(path_or_query: str, auto_open: bool) -> dict[str, Any]:
     """Opens a local audio or video file via the user's default media player."""
+    if not _is_media_file(path_or_query):
+        raise ValueError(
+            f"Target file '{path_or_query}' is not a recognized media (audio/video) file according to system MIME discovery."
+        )
+
     opened = False
     launch_method: str | None = None
     if auto_open:
@@ -314,7 +326,7 @@ def play_song(
         return _play_apple_music(clean_query, auto_open=auto_open, browser=browser)
     elif platform_clean in ("jiosaavn", "saavn"):
         return _play_jiosaavn(clean_query, auto_open=auto_open, browser=browser)
-    elif platform_clean in ("local", "file", "vlc") or os.path.exists(clean_query):
+    elif platform_clean in ("local", "file", "vlc") or (os.path.exists(clean_query) and _is_media_file(clean_query)):
         return _play_local_media(clean_query, auto_open=auto_open)
     else:
         raise ValueError(

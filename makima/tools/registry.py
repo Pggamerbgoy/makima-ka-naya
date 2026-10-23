@@ -315,20 +315,41 @@ def synthesize_parameters_schema(
             ArgsModel = create_model(model_name, __config__=config, **safe_fields)
             raw_schema = ArgsModel.model_json_schema()
 
-    # Clean schema for strict LLM API consumption (OpenAI & Gemini standards)
+    # Clean schema for strict LLM API consumption (OpenAI & Groq standards)
+    def _enforce_strict_schema(obj: Any) -> None:
+        if not isinstance(obj, dict):
+            return
+        if obj.get("type") == "object":
+            obj["additionalProperties"] = False
+            p = obj.get("properties")
+            if p and isinstance(p, dict):
+                # Retain only actual required fields computed by Pydantic; do not force optional parameters to required
+                if obj is clean_schema:
+                    actual_req = raw_schema.get("required", [])
+                    obj["required"] = [k for k in actual_req if k in p]
+                elif "required" in obj:
+                    obj["required"] = [k for k in obj["required"] if k in p]
+                else:
+                    obj.pop("required", None)
+                for val in p.values():
+                    _enforce_strict_schema(val)
+            else:
+                obj.pop("required", None)
+        for k, v in obj.items():
+            if isinstance(v, dict):
+                _enforce_strict_schema(v)
+            elif isinstance(v, list):
+                for item in v:
+                    _enforce_strict_schema(item)
+
     clean_schema: Dict[str, Any] = {
         "type": "object",
         "properties": raw_schema.get("properties", {}),
     }
-
-    if not has_kwargs:
-        clean_schema["additionalProperties"] = False
-
-    if "required" in raw_schema and raw_schema["required"]:
-        clean_schema["required"] = raw_schema["required"]
-
     if "$defs" in raw_schema and raw_schema["$defs"]:
         clean_schema["$defs"] = raw_schema["$defs"]
+
+    _enforce_strict_schema(clean_schema)
 
     return clean_schema, ArgsModel, pos_only_names, has_kwargs
 

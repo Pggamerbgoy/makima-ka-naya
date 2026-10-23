@@ -31,23 +31,25 @@ from makima.gateway.adapters.whatsapp import normalize_whatsapp_jid
 
 
 def test_habit_learning():
+    import tempfile
     print("\n--- [TEST 1] Implicit Habit & Preference Learning ---")
-    state_mem = StateMemory()
-    learner = ImplicitPreferenceLearner(state_memory=state_mem, enable_llm_reflection=False)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        state_mem = StateMemory(data_dir=tmp_dir)
+        learner = ImplicitPreferenceLearner(state_memory=state_mem, enable_llm_reflection=False)
 
-    # 1. User sets a preference implicitly in natural Hinglish
-    user_msg = "mujhe pasand hai 9anime par anime dekhna"
-    extracted = learner.extract_heuristically(user_msg)
-    print(f"  User input: '{user_msg}'")
-    print(f"  Heuristic Learner extracted: '{extracted}'")
-    assert extracted is not None, "Failed extracting implicit preference"
+        # 1. User sets a preference implicitly in natural Hinglish
+        user_msg = "mujhe pasand hai 9anime par anime dekhna"
+        extracted = learner.extract_heuristically(user_msg)
+        print(f"  User input: '{user_msg}'")
+        print(f"  Heuristic Learner extracted: '{extracted}'")
+        assert extracted is not None, "Failed extracting implicit preference"
 
-    # Persist to USER.md
-    state_mem.append_user_profile(extracted)
-    user_profile = state_mem.read_user_profile()
-    print(f"  Updated User Profile in Memory:\n{user_profile.strip()}")
-    assert "9anime" in user_profile, "9anime not found in persistent user profile"
-    print("  [PASS] Habit automatically extracted & recorded into user profile.")
+        # Persist to isolated USER.md
+        state_mem.append_user_profile(extracted)
+        user_profile = state_mem.read_user_profile()
+        print(f"  Updated User Profile in Memory:\n{user_profile.strip()}")
+        assert "9anime" in user_profile, "9anime not found in persistent user profile"
+        print("  [PASS] Habit automatically extracted & recorded into user profile.")
 
 
 def test_master_volume_control():

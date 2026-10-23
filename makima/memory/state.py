@@ -6,6 +6,7 @@ Zero-Hardcoding Guarantee: Fully dynamic paths, auto-template provisioning, and 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import threading
@@ -80,7 +81,7 @@ class StateMemory:
             resolve_path(user_path) if user_path else (self.data_dir / "USER.md")
         )
 
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._user_cache: Optional[str] = None
         self._user_mtime_ns: Optional[int] = None
         self._memory_cache: Optional[str] = None
@@ -215,10 +216,13 @@ class StateMemory:
                 # Append to bottom of file
                 content = content.rstrip() + f"\n{cleaned_fact}\n"
 
-            self.memory_path.write_text(content, encoding="utf-8")
+            self._memory_mtime_ns = self._atomic_write(self.memory_path, content)
             self._memory_cache = content.strip()
-            self._memory_mtime_ns = self.memory_path.stat().st_mtime_ns
             logger.info(f"Recorded fact to {self.memory_path} (category: {category or 'General'})")
+
+    async def append_fact_async(self, fact: str, category: Optional[str] = None) -> None:
+        """Asynchronously appends a fact without stalling the event loop."""
+        await asyncio.to_thread(self.append_fact, fact, category)
 
     def update_fact(self, search_text: str, new_fact: str) -> bool:
         """
@@ -281,18 +285,24 @@ class StateMemory:
                 logger.info(f"Deleted fact in {self.memory_path} matching '{search_text}'")
             return found
 
+    def _atomic_write(self, path: Path, content: str) -> int:
+        """Writes atomically via a temporary file and returns new mtime_ns."""
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(path)
+        return path.stat().st_mtime_ns
+
     def update_user_profile(self, new_content: str) -> None:
         """Replaces the entire content of USER.md with new_content."""
         self.ensure_files()
         with self._lock:
             new_body = new_content.strip() + "\n"
-            self.user_path.write_text(new_body, encoding="utf-8")
+            self._user_mtime_ns = self._atomic_write(self.user_path, new_body)
             self._user_cache = new_body.strip()
-            self._user_mtime_ns = self.user_path.stat().st_mtime_ns
             logger.info(f"Overwrote user profile at {self.user_path}")
 
     def append_user_profile(self, note: str) -> None:
-        """Appends a preference or note bullet point to USER.md."""
+        """Appends a preference or note bullet point to USER.md with deduplication."""
         self.ensure_files()
         cleaned = note.strip()
         if not (cleaned.startswith("- ") or cleaned.startswith("* ")):
@@ -300,11 +310,19 @@ class StateMemory:
 
         with self._lock:
             content = self.user_path.read_text(encoding="utf-8").rstrip()
+            # Case-insensitive exact line deduplication
+            existing_lines = {line.strip().lower() for line in content.splitlines()}
+            if cleaned.lower() in existing_lines:
+                return
+
             content = content + f"\n{cleaned}\n"
-            self.user_path.write_text(content, encoding="utf-8")
+            self._user_mtime_ns = self._atomic_write(self.user_path, content)
             self._user_cache = content.strip()
-            self._user_mtime_ns = self.user_path.stat().st_mtime_ns
             logger.info(f"Appended note to user profile at {self.user_path}")
+
+    async def append_user_profile_async(self, note: str) -> None:
+        """Asynchronously appends a user preference without stalling the event loop."""
+        await asyncio.to_thread(self.append_user_profile, note)
 
     def delete_user_preference(self, search_text: str) -> bool:
         """

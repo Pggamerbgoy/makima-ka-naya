@@ -55,7 +55,10 @@ def test_local_static_ui_and_origin_guards(tmp_path: Path):
             pass
 
 
-def test_settings_connectors_and_tools_contract(tmp_path: Path):
+def test_settings_connectors_and_tools_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MAKIMA_ENV_FILE", str(tmp_path / ".env.test"))
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE", raising=False)
     client = make_client(tmp_path / "ui_state.json")
     settings = client.get("/api/settings")
     assert settings.status_code == 200

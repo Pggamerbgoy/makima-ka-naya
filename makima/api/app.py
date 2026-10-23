@@ -44,6 +44,7 @@ logger = logging.getLogger("makima.api.app")
 class ChatRequest(BaseModel):
     """Payload for POST /api/chat."""
     prompt: Optional[str] = Field(default=None, description="User prompt string.")
+    message: Optional[str] = Field(default=None, description="Alias for prompt.")
     messages: Optional[List[Dict[str, Any]]] = Field(default=None, description="Pre-existing conversation turns.")
     task: Optional[str] = Field(default="fast_chat", description="Task classification for ParetoRouter.")
     system_prompt: Optional[str] = Field(default=None, description="Custom system prompt.")
@@ -342,7 +343,7 @@ def create_app(
     # State tracking. Only UI preferences and control-plane toggles are stored;
     # provider credentials remain in the server environment/configuration.
     app.state.start_time = time.time()
-    app.state.engine = engine
+    app.state.engine = engine or build_engine()
     app.state.registry = registry or build_registry()
     app.state.plugin_manager = plugin_manager or build_plugin_manager()
     app.state.ui_state_path = ui_state_path or _ui_state_path()
@@ -509,10 +510,17 @@ def create_app(
         router = getattr(eng, "router", None) if eng else None
         if router is None:
             router = ParetoRouter()
+        
+        if hasattr(router, "discover_live_models"):
+            try:
+                await router.discover_live_models()
+            except Exception as exc:
+                logger.debug("Live model discovery during status poll skipped: %s", exc)
+
         backends_status: Dict[str, Any] = {}
 
-        for name, backend_cfg in router.settings.providers.backends.items():
-            provider = router._providers.get(name)
+        for name, provider in router._providers.items():
+            backend_cfg = provider.config
             is_avail = False
             if provider:
                 avail_val = getattr(provider, "is_available", False)
@@ -854,6 +862,16 @@ def create_app(
         if body.header_name:
             auth_cfg["header_name"] = body.header_name
 
+        target_env = dict(body.env or {})
+        token_to_save = body.token
+        if "github" in (plugin_id + " " + body.name).lower():
+            saved_token = token_to_save or os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN") or ""
+            if saved_token:
+                target_env["GITHUB_PERSONAL_ACCESS_TOKEN"] = saved_token
+                target_env["GITHUB_TOKEN"] = saved_token
+                if not token_to_save:
+                    token_to_save = saved_token
+
         manifest = PluginManifest(
             id=plugin_id,
             name=body.name,
@@ -867,12 +885,12 @@ def create_app(
             base_url=body.base_url,
             command=body.command,
             args=tuple(body.args),
-            env=body.env or None,
+            env=target_env or None,
             auth_type=body.auth_type,
             auth_config=auth_cfg,
         )
         
-        pm.save_manifest(manifest, secret_token=body.token)
+        pm.save_manifest(manifest, secret_token=token_to_save)
         await pm.load_all(reg)
         refreshed = pm.get_manifest(plugin_id) or manifest
         return {
@@ -1003,7 +1021,8 @@ def create_app(
             eng = build_engine(registry=request.app.state.registry)
             request.app.state.engine = eng
 
-        if not body.prompt and not body.messages:
+        effective_prompt = body.prompt or body.message
+        if not effective_prompt and not body.messages:
             raise HTTPException(
                 status_code=400,
                 detail="Either 'prompt' or non-empty 'messages' must be provided.",
@@ -1052,16 +1071,16 @@ def create_app(
         try:
             reg = request.app.state.registry or get_registry(auto_discover=True)
             user_message_id = f"message_{uuid.uuid4().hex}"
-            if body.session_id and body.prompt:
+            if body.session_id and effective_prompt:
                 request.app.state.session_store.add_message(
                     body.session_id,
                     user_message_id,
                     "user",
-                    body.prompt,
+                    effective_prompt,
                     metadata={"operation": "chat"},
                 )
             result = await eng.run(
-                prompt=body.prompt,
+                prompt=effective_prompt,
                 messages=parsed_messages,
                 system_prompt=body.system_prompt,
                 tools=reg,

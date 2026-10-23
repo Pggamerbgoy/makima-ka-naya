@@ -1,3 +1,15 @@
+# Environment & Secrets (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.sqlite3
+*.db
+telemetry.sqlite3
+data/
+
 # Dependencies
 node_modules/
 .venv/

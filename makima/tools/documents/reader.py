@@ -54,10 +54,8 @@ def resolve_document_path(file_path: str | Path) -> Path:
 
     allowed_roots: list[Path] = [ws]
 
-    # User home directory and common safe user folders
+    # Safe user folders (never allow the raw user home root to prevent reading .ssh, .aws, etc.)
     home = Path.home().resolve()
-    allowed_roots.append(home)
-
     for sub in ["Documents", "Downloads", "Desktop", "Music", "Videos", "Pictures", "OneDrive"]:
         sub_folder = (home / sub).resolve()
         if sub_folder.exists():
@@ -66,6 +64,15 @@ def resolve_document_path(file_path: str | Path) -> Path:
     # Temp directory for sandboxes & tests
     temp_dir = Path(tempfile.gettempdir()).resolve()
     allowed_roots.append(temp_dir)
+
+    # Enforce strict credential protection
+    from makima.tools.filesystem.safe_io import PROTECTED_CREDENTIAL_PATTERNS
+    name = resolved.name
+    for pattern in PROTECTED_CREDENTIAL_PATTERNS:
+        if pattern.match(name):
+            raise BoundaryTraversalError(
+                f"Security Violation: Access denied to protected credential/sensitive file '{name}'."
+            )
 
     is_safe = False
     for root in allowed_roots:

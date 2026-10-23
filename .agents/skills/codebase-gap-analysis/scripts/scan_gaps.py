@@ -24,7 +24,14 @@ from pathlib import Path
 DEFAULT_EXCLUDE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
     ".next", ".nuxt", "target", "vendor", ".mypy_cache", ".pytest_cache",
-    "coverage", ".tox", "egg-info",
+    "coverage", ".tox", "egg-info", "bin", "third_party", ".swarm", "data",
+    ".gemini", "assets",
+}
+
+IGNORE_EXTS = {
+    "exe", "dll", "so", "dylib", "bin", "png", "jpg", "jpeg", "gif", "ico",
+    "webp", "svg", "pdf", "zip", "tar", "gz", "7z", "pyc", "pyo", "pyd",
+    "db", "sqlite", "sqlite3", "lock", "tsbuildinfo", "map", "woff", "woff2",
 }
 
 # Each pattern: (category, compiled_regex, note)
@@ -79,6 +86,8 @@ def iter_source_files(root: Path, extensions: set):
         dirnames[:] = [d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS and not d.startswith(".")]
         for fname in filenames:
             ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
+            if ext in IGNORE_EXTS:
+                continue
             if ext in extensions:
                 yield Path(dirpath) / fname
 
@@ -86,6 +95,9 @@ def iter_source_files(root: Path, extensions: set):
 def scan_file(path: Path, root: Path) -> dict:
     findings = {}
     try:
+        # Skip files exceeding 1MB to avoid memory overhead or minified bundle freezing
+        if path.stat().st_size > 1_000_000:
+            return findings
         text = path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return findings

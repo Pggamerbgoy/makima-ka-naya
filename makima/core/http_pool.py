@@ -73,15 +73,29 @@ async def get_shared_client() -> httpx.AsyncClient:
                     logger.debug(f"Error closing previous client during re-init: {exc}")
             _shared_client = None
 
-        logger.debug("Initializing persistent shared httpx.AsyncClient singleton.")
+        try:
+            from makima.config import get_settings
+            s = get_settings()
+            max_keepalive = getattr(s, "http_max_keepalive", 50)
+            max_conn = getattr(s, "http_max_connections", 100)
+            timeout_val = getattr(s, "http_timeout", 30.0)
+        except Exception:
+            max_keepalive = 50
+            max_conn = 100
+            timeout_val = 30.0
+
+        logger.debug(
+            "Initializing persistent shared httpx.AsyncClient (max_conn=%d, keepalive=%d, timeout=%.1fs)",
+            max_conn, max_keepalive, timeout_val
+        )
         _shared_client = httpx.AsyncClient(
             http2=True,
             limits=httpx.Limits(
-                max_keepalive_connections=50,
-                max_connections=100,
+                max_keepalive_connections=max_keepalive,
+                max_connections=max_conn,
                 keepalive_expiry=30.0,
             ),
-            timeout=httpx.Timeout(30.0, connect=5.0),
+            timeout=httpx.Timeout(timeout_val, connect=5.0),
         )
         _client_loop = current_loop
         return _shared_client
@@ -102,3 +116,19 @@ async def close_shared_client() -> None:
         finally:
             _shared_client = None
             _client_loop = None
+
+
+class HTTPPool:
+    """
+    Class-based interface providing thread-safe and loop-safe access to the shared HTTP pool.
+    """
+
+    @classmethod
+    async def get_client(cls) -> httpx.AsyncClient:
+        """Returns the loop-aware persistent httpx.AsyncClient singleton."""
+        return await get_shared_client()
+
+    @classmethod
+    async def close(cls) -> None:
+        """Closes the active connection pool gracefully."""
+        await close_shared_client()

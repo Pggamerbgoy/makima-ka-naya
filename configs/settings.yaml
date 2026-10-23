@@ -19,35 +19,70 @@ providers:
     cooldown_seconds: 30
     jitter: true
 
-  # Task Cascades: Free tiers prioritized
+  # Task Cascades: Prioritized free/active tiers
   cascades:
-    fast_chat: ["gemini", "groq", "openrouter_free", "ollama"]
-    code: ["ollama", "groq", "openrouter_free", "gemini"]
-    deep_reasoning: ["gemini", "openrouter_free", "ollama"]
-    vision: ["gemini", "alibaba_qwen_vl_plus"]
+    fast_chat: ["alibaba_qwen_flash", "alibaba_qwen_omni_plus", "openrouter_free", "groq", "ollama"]
+    code: ["alibaba_qwen_flash", "alibaba_qwen_omni_plus", "openrouter_free", "groq", "ollama"]
+    deep_reasoning: ["alibaba_qwen_flash", "alibaba_qwen_omni_plus", "openrouter_free", "groq", "ollama"]
+    vision: ["alibaba_qwen_flash", "alibaba_qwen_omni_plus", "gemini"]
     voice: ["gemini_live"]
     offline: ["ollama"]
     # OSWorld evaluates Makima end-to-end with Alibaba Cloud as its reasoning backend.
     osworld: [
-      "alibaba_qwen_37_plus",
-      "alibaba_glm_52",
-      "alibaba_qwen_38_moe",
-      "alibaba_qwen_37_flash",
-      "alibaba_kimi_k27",
-      "alibaba_deepseek_v4_flash",
-      "alibaba_qwen_coder_flash",
-      "alibaba_glm_53",
-      "alibaba_qwen_vl_plus_snapshot",
-      "alibaba_qwen_vl_plus",
-      "alibaba_qwen_vl_flash_snapshot",
-      "alibaba_qwen_max",
-      "alibaba_qwen_max_37",
-      "alibaba_qwen_plus_37",
-      "alibaba_qwen_plus_36",
-      "alibaba_qwen_plus",
+      "alibaba_qwen_flash",
+      "alibaba_qwen_omni_plus",
+      "openrouter_free",
+      "groq",
+      "ollama",
     ]
 
   backends:
+    alibaba_qwen_flash:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen-flash-2025-07-28"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+    alibaba_qwen_omni_flash:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.5-omni-flash"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+    alibaba_qwen_36_plus:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.6-plus-2026-04-02"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_35_plus:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.5-plus-2026-04-20"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "fast"
+      context_limit: 131072
+
+    alibaba_qwen_36_moe:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.6-35b-a3b"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
+    alibaba_qwen_omni_plus:
+      adapter: "openai"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      model: "qwen3.5-omni-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      latency_tier: "standard"
+      context_limit: 131072
+
     alibaba_qwen_37_plus:
       adapter: "openai"
       base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -99,7 +134,7 @@ providers:
     alibaba_qwen_coder_flash:
       adapter: "openai"
       base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-      model: "qwen3-coder-flash"
+      model: "qwen3-coder-flash-2025-07-28"
       api_key_env: "DASHSCOPE_API_KEY"
       latency_tier: "fast"
       context_limit: 131072
@@ -164,7 +199,7 @@ providers:
     alibaba_qwen_plus_36:
       adapter: "openai"
       base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-      model: "qwen3.6-plus"
+      model: "qwen3.6-plus-2026-04-02"
       api_key_env: "DASHSCOPE_API_KEY"
       latency_tier: "fast"
       context_limit: 131072
@@ -172,7 +207,7 @@ providers:
     alibaba_qwen_plus:
       adapter: "openai"
       base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-      model: "qwen-plus"
+      model: "qwen-plus-2025-07-14"
       api_key_env: "DASHSCOPE_API_KEY"
       latency_tier: "standard"
       context_limit: 131072
@@ -187,7 +222,7 @@ providers:
     groq:
       adapter: "openai"
       base_url: "https://api.groq.com/openai/v1"
-      model: "llama-3.3-70b-versatile"
+      model: "openai/gpt-oss-120b"
       api_key_env: "GROQ_API_KEY"
       latency_tier: "fast"
       context_limit: 128000
@@ -202,7 +237,7 @@ providers:
     openrouter_free:
       adapter: "openai"
       base_url: "https://openrouter.ai/api/v1"
-      model: "meta-llama/llama-3.3-70b-instruct:free"
+      model: "nvidia/nemotron-3.5-lightning:free"
       api_key_env: "OPENROUTER_API_KEY"
       latency_tier: "standard"
       context_limit: 64000

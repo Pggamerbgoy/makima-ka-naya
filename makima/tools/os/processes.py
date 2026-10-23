@@ -323,6 +323,20 @@ def terminate_process(
     target_name = target_proc.name()
 
     try:
+        # Recursively terminate children first to avoid orphaned subprocess trees
+        try:
+            children = target_proc.children(recursive=True)
+            for child in children:
+                try:
+                    if force:
+                        child.kill()
+                    else:
+                        child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
         if force:
             target_proc.kill()
         else:

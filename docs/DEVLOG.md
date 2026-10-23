@@ -2,6 +2,64 @@
 
 > **Purpose**: Formal engineering record of major architectural decisions, evaluated tradeoffs, rejected alternatives, and resolved platform-specific edge cases throughout the development of Makima v2.
 
+## 📅 2026-10-23
+
+### Entry 16: Comprehensive Subsystem Audit, HTTP Connection Pooling, Fault-Tolerant Memory & Zero-Hardcoding Guarantees
+- **Context**: The user requested a full-codebase adversarial audit and structural hardening across Makima's Core, Sentinel, Memory, Gateway, and Tools subsystems to eradicate hardcoded endpoints, connection overhead, memory deadlocks, and silent failure modes before publishing the repository.
+- **Decisions & Tradeoffs**:
+  1. **HTTP Connection Pooling (`makima/core/http_pool.py`)**:
+     - *Issue*: Ad-hoc `httpx.AsyncClient()` instantiations across search tools and REST adapters incurred TCP handshake overhead and socket exhaustion under high concurrency.
+     - *Solution*: Implemented singleton `HTTPPool` bound to active event loops with keepalive limits (`settings.http_max_keepalive`, `settings.http_max_connections`) and request timeouts dynamically derived from `MakimaSettings`.
+  2. **Fault-Tolerant Memory Engine (`reflection.py`, `state.py`, `vector_search.py`, `episodic.py`)**:
+     - *Reflection Lock Safety*: Replaced shared module lock with dynamic event-loop binding to prevent cross-thread `RuntimeError` during asynchronous reflection.
+     - *Atomic Profile Writes*: Added `_atomic_write` utilizing temporary files (`.tmp`) and atomic filesystem replacement to prevent corrupted or zero-byte `USER.md` on sudden crashes.
+     - *FTS5 Reserved Word Filtering*: Stripped boolean operator collision tokens (`AND`, `OR`, `NOT`, `NEAR`) from raw search queries to ensure 100% SQLite FTS5 query stability.
+     - *LRU Caching & Dynamic Vectors*: Added 1,000-entry LRU embedding cache in `VectorSearchEngine` and dynamic dimension resolution from `configs/settings.yaml`.
+  3. **Gateway Supervisor Resilience (`makima/gateway/daemon.py` & adapters)**:
+     - Isolated platform adapters (`telegram`, `discord`, `whatsapp`, `email`) in supervised initialization handlers with exponential backoff on network disconnections.
+  4. **Adversarial Context Scaling (`makima/core/context.py`)**:
+     - Implemented dynamic budget scaling for `_clamp_large_message` ensuring small-budget contexts (e.g. 8k LLaMA) clamp oversized payloads (<2200 chars) while large-budget contexts (Gemini 1M, Qwen 128k) preserve full operational trace.
+- **Verification & Outcome**:
+  - `tests/verify_sentinel.py`: All 8 stages passed with exit code 0.
+  - `tests/verify_memory.py` & `tests/verify_vector_search.py`: Passed 100% (7/7).
+  - `tests/verify_engine.py` & `tests/verify_engine_memory.py`: Passed 100% (8/8).
+  - `tests/test_tier5_adversarial_hardening.py`: 21/21 passed in 11.72s.
+  - `tests/verify_gateway_core.py` & `tests/verify_whatsapp_email.py`: Passed 100%.
+
+---
+
+## 📅 2026-10-17
+
+### Entry 15: Claude-Style Live & Collapsible Execution Stepper on Chat UI
+- **Context**: The user requested Claude-style step transparency ("makima ke steps bhi show karo ui pe pls jisse pta chale user ko ki makima kaha stop ho rhi and kaha pahochi hai just like claude"). Previously, users only saw a static pulsing "Makima is reasoning & synthesizing..." badge during execution, and all tool execution traces vanished once generation finished, leaving no record of what tools were executed, what parameters were passed, where Makima stopped, or why a step failed.
+- **Decisions & Tradeoffs**:
+  1. **Dual-Lifecycle Stepper (Live vs Collapsed Trace)**:
+     - *Live Stepper (`message.pending === true`)*: Replaced the static thinking block with a real-time reactive execution timeline. Displays the currently running step with an active spinner, dynamic stage notice (e.g. `Browsing live web (navigate to https://www.miruro.ru)...`), and previously completed steps with green checks or failure badges.
+     - *Completed Accordion (`message.pending === false`)*: Collapses into a clean, modern Claude-style accordion header (`▼ Thought & executed N steps [browser_interact] 1.2s`). If any step failed or encountered an error, the accordion automatically expands by default to immediately highlight the exact failed step and error reason to the user.
+  2. **Detailed Parameter & Output Inspection**:
+     - Each step item contains collapsible parameter drawer (`Parameters: formatted JSON`) and output preview (`Output: formatted text/JSON truncated safely`), allowing deep inspection without visual clutter.
+  3. **Full End-to-End WebSocket & Session Persistence**:
+     - Updated `makima/api/ws.py` to record structured `executed_steps` in real time during `ws_tool_executor` and `on_turn_end`.
+     - Attached `steps` in `send({"type": "message", "steps": ...})`, `send({"type": "task_cancelled", ...})`, and `send({"type": "error", ...})`.
+     - Saved `steps` into SQLite `messages.metadata["steps"]`, ensuring that historical sessions loaded via `api.getSession()` retain the full execution accordion across page refreshes and session switching.
+- **Verification & Outcome**:
+  - `tsc -b && vite build` passed cleanly with exit code 0 (`dist/` production assets generated).
+  - All core engine test suites (`tests/verify_engine.py` and `tests/verify_engine_memory.py`) pass 100%.
+
+### Entry 14: System Prompt Streamlining & Runtime Engine Protocol Alignment
+- **Context**: An honest behavioral and code audit of `HermesAgentEngine.DEFAULT_SYSTEM_PROMPT` revealed token bloat from 5 redundant sections (`<capabilities>`, `<todo_rules>`, `<writing_rules>`, `<multi_agent_rules>`, `<task_completion_checklist>`), and missing instructions for 3 real engine runtime communication envelopes (`[TOOL_FAILED: name]`, `[CONTEXT COMPRESSED: N turns omitted]`, `[SYSTEM NOTICE: Loop detected]`).
+- **Decisions & Tradeoffs**:
+  1. **Zero-Duplication Pruning**: Removed `<capabilities>` because tools are dynamically declared in `tool_schemas` (OpenAI/Gemini function calling format). Removed `<todo_rules>`, `<writing_rules>`, and `<task_completion_checklist>` which duplicated `<agent_loop>`, `<language_settings>`, and `<coding_rules>`. Folded `<multi_agent_rules>` into a single sentence inside `<identity>`.
+  2. **Preserving Critical Edge Cases**: Retained shell-escaping avoidance and large scrape scratch-file persistence in a tight 3-line `<file_rules>`, and moved multi-session task state persistence into `<memory_rules>`.
+  3. **Explicit Runtime Engine Contracts**:
+     - Added `[TOOL_FAILED: <tool_name>] <ErrorType>: <message>` protocol in `<tool_use_rules>`.
+     - Added `[CONTEXT COMPRESSED: ...]` protocol in `<cross_turn_context>` ensuring condensed summaries are treated as ground truth without reprompting the user.
+     - Added `[SYSTEM NOTICE: Loop detected — ...]` and `[SYSTEM DIRECTIVE]` protocol in `<agent_loop>` to trigger immediate stop and final synthesis.
+  4. **Platform-Conditioned Suggestions**: Conditioned the ````suggestions ... ```` block in `<response_style>` to conversational chat / React web UI, omitting it for voice mode and 1-line acknowledgments to save tokens.
+- **Verification & Outcome**: `DEFAULT_SYSTEM_PROMPT` reduced from 610 lines to 532 lines (**-78 lines, -963 tokens saved per turn**). All 8 core engine tests in `tests/verify_engine.py` and all 4 memory tests in `tests/verify_engine_memory.py` pass with 100% success.
+
+---
+
 ## 📅 2026-09-30
 
 ### Entry 13: Autonomous Implicit User Preference & Habit Learning (Step 39)

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Pattern
 
 from makima.tools.registry import ToolError, tool
 
@@ -30,6 +31,22 @@ logger = logging.getLogger(__name__)
 class BoundaryTraversalError(PermissionError, ToolError):
     """Raised when a path resolves outside the permitted workspace directory."""
     pass
+
+
+class ProtectedCredentialError(PermissionError, ToolError):
+    """Raised when an operation attempts to access protected credentials or sensitive files."""
+    pass
+
+
+# Strict deny-list for sensitive credentials, secret keys, and browser databases
+PROTECTED_CREDENTIAL_PATTERNS: List[Pattern[str]] = [
+    re.compile(r"^\.env([._-].+)?$", re.IGNORECASE),
+    re.compile(r"^id_(rsa|ed25519|ecdsa|dsa)(\.pub)?$", re.IGNORECASE),
+    re.compile(r".*\.(pem|key|pfx|p12)$", re.IGNORECASE),
+    re.compile(r".*(credential|secret|service[-_]account).*\.json$", re.IGNORECASE),
+    re.compile(r"^(login data|cookies\.sqlite|web data)$", re.IGNORECASE),
+    re.compile(r"^(sam|system|security|ntuser\.dat)$", re.IGNORECASE),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +134,15 @@ def resolve_safe_path(path: Path | str, workspace_dir: Optional[Path | str] = No
             f"Security Boundary Violation: Path '{path}' resolves to '{resolved}', "
             f"which escapes the permitted workspace boundary '{ws}'."
         )
+
+    # Protected credential & sensitive file pattern deny-list
+    for part in resolved.parts:
+        for pat in PROTECTED_CREDENTIAL_PATTERNS:
+            if pat.search(part):
+                raise ProtectedCredentialError(
+                    f"Protected Credential Access Denied: Path '{resolved.name}' matches protected sensitive file pattern. "
+                    "Access is strictly blocked by Makima security guardrails."
+                )
 
     return resolved
 

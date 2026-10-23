@@ -18,13 +18,65 @@ from makima.tools.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
+
+def get_live_model() -> str:
+    """
+    Dynamically resolves the Live API model without hardcoding.
+    Priority:
+    1. Environment variable (MAKIMA_LIVE_MODEL / GEMINI_LIVE_MODEL / MAKIMA_VOICE__MODEL)
+    2. settings.yaml (voice.model)
+    3. Fallback default ('gemini-3.8-live')
+    """
+    try:
+        settings = get_settings()
+        voice_cfg = getattr(settings, "voice", None)
+        cfg_model = getattr(voice_cfg, "model", None) if voice_cfg else None
+    except Exception:
+        cfg_model = None
+
+    return (
+        os.getenv("MAKIMA_LIVE_MODEL")
+        or os.getenv("GEMINI_LIVE_MODEL")
+        or os.getenv("MAKIMA_VOICE__MODEL")
+        or cfg_model
+        or "gemini-3.8-live"
+    )
+
+
+def get_voice_name() -> str:
+    """
+    Dynamically resolves the Live voice persona without hardcoding.
+    Options: Aoede, Charon, Fenrir, Kore, Puck.
+    """
+    try:
+        settings = get_settings()
+        voice_cfg = getattr(settings, "voice", None)
+        cfg_voice = getattr(voice_cfg, "voice_name", None) if voice_cfg else None
+    except Exception:
+        cfg_voice = None
+
+    return (
+        os.getenv("MAKIMA_VOICE_NAME")
+        or os.getenv("MAKIMA_VOICE__VOICE_NAME")
+        or cfg_voice
+        or "Aoede"
+    )
+
+
 DEFAULT_LIVE_MODEL = "gemini-3.8-live"
 
 
 DEFAULT_VOICE_SYSTEM_INSTRUCTION = (
-    "You are Makima (in hands-free Jarvis Mode), a brilliant, concise, and helpful personal voice AI. "
+    "You are Makima (in hands-free Jarvis Mode), a brilliant, concise, and proactive personal voice AI. "
     "Speak directly and conversationally without verbose preamble or markdown syntax. "
-    "You have full access to all system, media, browser, and developer tools; invoke them directly when needed."
+    "You have full access to all system, media, browser, and developer tools; invoke them directly when needed.\n"
+    "SEMANTIC PROACTIVITY RULES:\n"
+    "1. When you receive a '[SYSTEM_EVENT]' text prompt from the OS sentinel containing sanitized ambient context "
+    "(such as clipboard text, downloaded file metadata, or memory metrics), use your reasoning to evaluate user intent.\n"
+    "2. If the context represents an actionable task (e.g. tracking a package, organizing an invoice, scheduling a meeting, or freeing RAM), "
+    "proactively invoke the appropriate tool or speak a brief 1-sentence helpful update.\n"
+    "3. If the event is irrelevant, casual chat, or non-actionable, REMAIN COMPLETELY SILENT (produce no output and call no tools).\n"
+    "4. Spoken updates must be natural, brief, and never recite long codes or file paths aloud."
 )
 
 
@@ -38,14 +90,14 @@ class GeminiLiveSession:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = DEFAULT_LIVE_MODEL,
-        voice_name: str = "Aoede",  # Options: Aoede, Charon, Fenrir, Kore, Puck
+        model: Optional[str] = None,
+        voice_name: Optional[str] = None,
         system_instruction: Optional[str] = None,
     ) -> None:
         self.settings = get_settings()
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or getattr(self.settings, "gemini_api_key", None)
-        self.model = model
-        self.voice_name = voice_name
+        self.model = model or get_live_model()
+        self.voice_name = voice_name or get_voice_name()
         self.system_instruction = system_instruction
         self._client: Optional[genai.Client] = None
         self._session: Optional[Any] = None

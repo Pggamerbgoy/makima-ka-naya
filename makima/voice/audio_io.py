@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
 import wave
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except Exception as _sd_err:
+    sd = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,10 @@ class AudioIO:
 
     DEFAULT_INPUT_RATE = 16000  # Standard 16kHz for STT & Live Audio models
     DEFAULT_OUTPUT_RATE = 24000  # Standard 24kHz for neural TTS
+
+    _stream: Any = None
+    _stream_lock: threading.Lock = threading.Lock()
+    _stream_queue: Any = None
 
     @classmethod
     def list_audio_devices(cls) -> List[Dict[str, Any]]:
@@ -127,12 +135,49 @@ class AudioIO:
     @classmethod
     def play_pcm_chunk(cls, pcm_bytes: bytes, sample_rate: int = DEFAULT_OUTPUT_RATE) -> bool:
         """
-        Plays raw 16-bit mono PCM audio chunk directly received from Gemini Live.
+        Plays raw 16-bit mono PCM audio chunk directly received from Gemini Live via continuous streaming.
         """
+        if sd is None or not pcm_bytes:
+            return False
         try:
-            audio_array = np.frombuffer(pcm_bytes, dtype=np.int16)
-            sd.play(audio_array, samplerate=sample_rate, blocking=False)
-            return True
+            import queue
+            with cls._stream_lock:
+                if cls._stream_queue is None:
+                    cls._stream_queue = queue.Queue(maxsize=200)
+
+                if cls._stream is None or not cls._stream.active:
+                    def _callback(outdata, frames, time_info, status):
+                        needed_bytes = frames * 2  # 16-bit mono = 2 bytes per sample
+                        accumulated = bytearray()
+                        while len(accumulated) < needed_bytes:
+                            try:
+                                chunk = cls._stream_queue.get_nowait()
+                                accumulated.extend(chunk)
+                            except queue.Empty:
+                                break
+                        if len(accumulated) < needed_bytes:
+                            accumulated.extend(b"\x00" * (needed_bytes - len(accumulated)))
+                        elif len(accumulated) > needed_bytes:
+                            excess = bytes(accumulated[needed_bytes:])
+                            cls._stream_queue.put(excess)
+                        outdata[:] = np.frombuffer(accumulated[:needed_bytes], dtype=np.int16).reshape(-1, 1)
+
+                    try:
+                        cls._stream = sd.OutputStream(
+                            samplerate=sample_rate,
+                            channels=1,
+                            dtype="int16",
+                            callback=_callback,
+                        )
+                        cls._stream.start()
+                    except Exception as stream_err:
+                        logger.debug("OutputStream init fallback: %s", stream_err)
+                        audio_array = np.frombuffer(pcm_bytes, dtype=np.int16)
+                        sd.play(audio_array, samplerate=sample_rate, blocking=False)
+                        return True
+
+                cls._stream_queue.put(pcm_bytes)
+                return True
         except Exception as exc:
             logger.warning("Raw PCM playback warning: %s", exc)
             return False
@@ -143,8 +188,23 @@ class AudioIO:
         Immediately halts active audio output.
         Critical for barge-in: when user starts speaking, cut off Gemini output immediately.
         """
-        try:
-            sd.stop()
-        except Exception as exc:
-            logger.debug("sd.stop notice: %s", exc)
+        with cls._stream_lock:
+            if cls._stream_queue:
+                while not cls._stream_queue.empty():
+                    try:
+                        cls._stream_queue.get_nowait()
+                    except Exception:
+                        break
+            if cls._stream:
+                try:
+                    cls._stream.stop()
+                    cls._stream.close()
+                except Exception:
+                    pass
+                cls._stream = None
+        if sd is not None:
+            try:
+                sd.stop()
+            except Exception as exc:
+                logger.debug("sd.stop notice: %s", exc)
 

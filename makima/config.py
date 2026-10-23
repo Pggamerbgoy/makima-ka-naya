@@ -11,6 +11,11 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from dotenv import load_dotenv
+
+# Ensure .env values are populated into os.environ for backend API key resolution
+load_dotenv()
+
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,7 +67,11 @@ class BackendConfig(BaseModel):
     def api_key(self) -> Optional[str]:
         """Dynamically fetch the API key from environment if configured."""
         if self.api_key_env:
-            return os.getenv(self.api_key_env)
+            raw = os.getenv(self.api_key_env)
+            if raw and "," in raw:
+                keys = [k.strip() for k in raw.split(",") if k.strip()]
+                return keys[0] if keys else None
+            return raw
         return None
 
     @property
@@ -130,6 +139,7 @@ class GatewayConfig(BaseModel):
 class VectorSearchConfig(BaseModel):
     enabled: bool = True
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    dimension: int = 384
 
 
 class MemoryConfig(BaseModel):
@@ -213,6 +223,13 @@ class MakimaSettings(BaseSettings):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
+
+    # Dynamic HTTP Pool & Tool Execution Limits
+    http_max_keepalive: int = 50
+    http_max_connections: int = 100
+    http_timeout: float = 30.0
+    tool_timeout: float = 45.0
+    max_tool_output_chars: int = 16000
 
     model_config = SettingsConfigDict(
         env_prefix="MAKIMA_",

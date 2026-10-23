@@ -100,36 +100,49 @@ def _infer_tool_tags(content: str, prior_messages: Optional[List[Any]] = None) -
                     elif any(w in tc_name for w in ("window", "screenshot", "mouse", "keyboard", "desktop")):
                         matched_tags.update(["desktop", "os", "apps", "windows"])
 
-    # 1. Media / Audio / Playback
-    if any(k in c for k in ("play", "music", "song", "spotify", "youtube", "volume", "sound", "track", "pause", "resume", "audio")):
-        matched_tags.update(["media", "music", "playback", "volume", "audio"])
+    # 1. Media / Audio / Video / Anime Playback
+    if any(k in c for k in ("play", "music", "song", "spotify", "youtube", "volume", "sound", "track", "pause", "resume", "audio", "anime", "video", "movie", "series", "watch", "stream", "dekhta", "sunta")):
+        matched_tags.update(["media", "music", "playback", "volume", "audio", "browser", "web"])
 
     # 2. Web Browsing / Online Search
-    if any(k in c for k in ("search", "google", "browse", "website", "url", "http", "click", "web", "fetch", "news", "price", "flipkart", "amazon")):
+    if any(k in c for k in ("search", "google", "browse", "website", "url", "http", "click", "web", "fetch", "news", "price", "flipkart", "amazon", "miruro")):
         matched_tags.update(["web", "browser", "fetch", "search"])
 
-    # 3. Desktop / OS / App Window Control
+    # 3. User Memory / Preferences / Habits
+    if any(k in c for k in ("preference", "habit", "remember", "yaad", "profile", "pasand", "hamesha", "pe dekhta", "pe sunta", "dekhta hu", "sunta hu")):
+        matched_tags.update(["memory", "facts", "preferences", "profile"])
+
+    # 4. Desktop / OS / App Window Control
     if any(k in c for k in ("open app", "launch", "window", "screenshot", "desktop", "cursor", "click", "type", "keyboard", "mouse", "minimize", "maximize", "close app")):
         matched_tags.update(["desktop", "os", "apps", "windows", "input", "mouse", "keyboard", "computer_use"])
 
-    # 4. Filesystem / Office Documents
+    # 5. Filesystem / Office Documents
     if any(k in c for k in ("file", "read", "write", "folder", "directory", "document", "excel", "sheet", "pdf", "word", "csv", "presentation", "powerpoint")):
         matched_tags.update(["filesystem", "documents", "excel", "word", "powerpoint", "reader", "io"])
 
-    # 5. Messaging / Comms
+    # 6. Messaging / Comms
     if any(k in c for k in ("whatsapp", "telegram", "discord", "email", "mail", "inbox", "send message", "contact")):
         matched_tags.update(["messaging", "whatsapp", "telegram", "discord", "email", "inbox"])
 
-    # 6. Terminal / Code / Shell
+    # 7. Terminal / Code / Shell
     if any(k in c for k in ("terminal", "command", "bash", "powershell", "cmd", "run", "execute", "python", "script", "install", "pip")):
         matched_tags.update(["terminal", "execution", "sandbox", "filesystem", "system"])
+
+    # 8. GitHub / Git / Repositories / Code Hosting
+    if any(k in c for k in ("github", "git", "repo", "repositories", "commit", "pull request", "pr", "issue", "branch", "fork", "push", "clone", "gist")):
+        matched_tags.update(["github", "git", "developer", "repositories", "code", "mcp", "terminal", "system"])
+
+    # 9. MCP Plugins / Marketplace Extensions
+    if any(k in c for k in ("mcp", "plugin", "extension", "marketplace", "sqlite", "database")):
+        matched_tags.update(["plugin", "mcp", "openapi", "database", "sqlite"])
 
     if matched_tags:
         # Always inject fundamental core capabilities (memory facts + profile + web search) alongside domain tools
         matched_tags.update(["memory", "facts", "preferences", "web", "search"])
         return sorted(matched_tags)
 
-    return None
+    # Safe bounded fallback for general conversation — prevents exceeding free model token limits (e.g. Groq 8000 TPM)
+    return sorted(["memory", "facts", "preferences", "web", "search", "media"])
 
 
 @router.websocket("/ws")
@@ -253,6 +266,16 @@ async def websocket_bridge(websocket: WebSocket) -> None:
         await send({"type": "status", "stage": "planning", "session_id": current_session_id, "message_id": user_message_id}, current_task_id)
 
         executed_tool_trace: list[str] = []
+        executed_steps: list[Dict[str, Any]] = []
+
+        def _safe_serialize(val: Any) -> Any:
+            if val is None or isinstance(val, (int, float, bool, str)):
+                return val
+            if isinstance(val, (list, tuple)):
+                return [_safe_serialize(x) for x in val[:50]]
+            if isinstance(val, dict):
+                return {str(k): _safe_serialize(v) for k, v in list(val.items())[:50]}
+            return str(val)
 
         def _format_tool_trace_entry(name: str, args: Dict[str, Any], res: Any) -> str:
             key_parts = []
@@ -274,7 +297,7 @@ async def websocket_bridge(websocket: WebSocket) -> None:
 
         async def ws_tool_executor(name: str, args: Dict[str, Any]) -> Any:
             call_id = f"call_{int(time.time() * 1000)}"
-            # Generate clean, user-friendly live status for the UI task notice bar
+            start_ts = time.time()
             stage_display = f"Executing {name}..."
             if name == "browser_interact":
                 action_name = str((args or {}).get("action") or "").lower()
@@ -287,6 +310,17 @@ async def websocket_bridge(websocket: WebSocket) -> None:
             elif name in ("execute_command", "run_command"):
                 c_text = str((args or {}).get("command") or "")[:30]
                 stage_display = f"Running command: '{c_text}'..." if c_text else "Executing command..."
+
+            step_entry: Dict[str, Any] = {
+                "id": call_id,
+                "type": "tool",
+                "name": name,
+                "stage": stage_display,
+                "arguments": _safe_serialize(args or {}),
+                "status": "running",
+                "timestamp": int(start_ts * 1000),
+            }
+            executed_steps.append(step_entry)
 
             await send({"type": "tool_call", "id": call_id, "name": name, "arguments": args}, current_task_id)
             await send({"type": "status", "stage": stage_display, "tool": name}, current_task_id)
@@ -301,17 +335,25 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                 executed_tool_trace.append(_format_tool_trace_entry(name, args or {}, result))
             except Exception:
                 pass
-            await send({"type": "tool_result", "id": call_id, "name": name, "result": result}, current_task_id)
+
+            duration_ms = int((time.time() - start_ts) * 1000)
+            is_err = False
+            err_text: Optional[str] = None
             if isinstance(result, str) and (result.startswith("[TOOL_FAILED") or result.startswith("[TOOL_DISABLED")):
-                err_text = result[:80]
-                await send({
-                    "type": "status",
-                    "stage": f"⚠️ {name} failed — trying alternate approach...",
-                    "tool": name,
-                    "error": err_text,
-                }, current_task_id)
+                is_err = True
+                err_text = result[:120]
             elif isinstance(result, dict) and (result.get("success") is False or result.get("error")):
-                err_text = str(result.get("error") or "failed")[:80]
+                is_err = True
+                err_text = str(result.get("error") or "failed")[:120]
+
+            step_entry["status"] = "failed" if is_err else "completed"
+            step_entry["result"] = _safe_serialize(result)
+            step_entry["durationMs"] = duration_ms
+            if is_err:
+                step_entry["error"] = err_text
+
+            await send({"type": "tool_result", "id": call_id, "name": name, "result": result, "duration_ms": duration_ms}, current_task_id)
+            if is_err:
                 await send({
                     "type": "status",
                     "stage": f"⚠️ {name} failed — trying alternate approach...",
@@ -322,10 +364,18 @@ async def websocket_bridge(websocket: WebSocket) -> None:
 
         async def on_turn_end(turn: int, response: ProviderResponse) -> None:
             if response.tool_calls and response.content and response.content.strip():
+                content_text = response.content.strip()
+                executed_steps.append({
+                    "id": f"thought_{turn}_{int(time.time() * 1000)}",
+                    "type": "thought",
+                    "stage": content_text,
+                    "status": "completed",
+                    "timestamp": int(time.time() * 1000),
+                })
                 # Stream intermediate assistant thought / explanation so user sees it in real-time
                 await send({
                     "type": "thought",
-                    "content": response.content.strip(),
+                    "content": content_text,
                     "turn": turn,
                     "session_id": current_session_id,
                 }, current_task_id)
@@ -366,6 +416,7 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                 "finish_reason": result.finish_reason, "latency_ms": result.latency_ms,
                 "artifacts": getattr(result, "artifacts", None) or [],
                 "suggestions": getattr(result, "suggestions", None) or [],
+                "steps": executed_steps,
                 "session_id": current_session_id,
                 "message_id": f"assistant_{current_task_id}",
                 "parent_message_id": user_message_id,
@@ -384,23 +435,44 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                         "finish_reason": result.finish_reason,
                         "suggestions": getattr(result, "suggestions", None) or [],
                         "tool_trace": executed_tool_trace[:12],
+                        "steps": executed_steps,
                     },
                 )
             await send({"type": "status", "stage": "completed", "latency_ms": result.latency_ms}, current_task_id)
         except asyncio.CancelledError:
+            if executed_steps and executed_steps[-1].get("status") == "running":
+                executed_steps[-1]["status"] = "failed"
+                executed_steps[-1]["error"] = "Cancelled by client"
             try:
                 if session_store:
-                    session_store.add_message(current_session_id, f"assistant_{current_task_id}", "assistant", "Task cancelled.", parent_message_id=user_message_id, metadata={"cancelled": True})
-                await send({"type": "task_cancelled", "reason": "cancelled_by_client"}, current_task_id)
+                    session_store.add_message(
+                        current_session_id,
+                        f"assistant_{current_task_id}",
+                        "assistant",
+                        "Task cancelled.",
+                        parent_message_id=user_message_id,
+                        metadata={"cancelled": True, "steps": executed_steps},
+                    )
+                await send({"type": "task_cancelled", "reason": "cancelled_by_client", "steps": executed_steps}, current_task_id)
                 await send({"type": "status", "stage": "cancelled"}, current_task_id)
             except Exception as e:
                 logger.debug("Exception during cancel cleanup: %s", e)
             raise
         except Exception as run_exc:
             logger.error("Error during agent execution: %s", run_exc, exc_info=True)
+            if executed_steps and executed_steps[-1].get("status") == "running":
+                executed_steps[-1]["status"] = "failed"
+                executed_steps[-1]["error"] = str(run_exc)[:200]
             if session_store:
-                session_store.add_message(current_session_id, f"assistant_{current_task_id}", "assistant", "Makima could not complete this task.", parent_message_id=user_message_id, metadata={"error": type(run_exc).__name__})
-            await send({"type": "error", "message": str(run_exc), "session_id": current_session_id, "message_id": f"assistant_{current_task_id}"}, current_task_id)
+                session_store.add_message(
+                    current_session_id,
+                    f"assistant_{current_task_id}",
+                    "assistant",
+                    "Makima could not complete this task.",
+                    parent_message_id=user_message_id,
+                    metadata={"error": type(run_exc).__name__, "steps": executed_steps},
+                )
+            await send({"type": "error", "message": str(run_exc), "steps": executed_steps, "session_id": current_session_id, "message_id": f"assistant_{current_task_id}"}, current_task_id)
             await send({"type": "status", "stage": "error"}, current_task_id)
         finally:
             running.pop(current_task_id, None)
@@ -421,9 +493,13 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                 break
 
             try:
-                payload: Dict[str, Any] = json.loads(raw_data)
+                payload = json.loads(raw_data)
             except Exception:
                 await send({"type": "error", "message": "Malformed JSON payload received."})
+                continue
+
+            if not isinstance(payload, dict):
+                await send({"type": "error", "message": "Expected JSON object dictionary payload."})
                 continue
 
             msg_type = payload.get("type")

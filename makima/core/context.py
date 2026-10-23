@@ -145,9 +145,13 @@ class ContextCompressor:
         """Resolves known model context limits or returns None if unknown."""
         if not model:
             return None
-        m = model.lower()
+        m = model.lower().strip()
         if "gemini" in m or "flash" in m:
             return 1000000
+        elif "qwen" in m and "coder" in m:
+            return 131072
+        elif "claude-3-5-sonnet" == m or "claude-3.5-sonnet" == m:
+            return 128000
         elif "qwen" in m or "glm" in m or "deepseek" in m or "kimi" in m:
             return 286000
         elif "claude" in m:
@@ -176,18 +180,25 @@ class ContextCompressor:
     ) -> Message:
         """
         Clamps an individual oversized message (e.g. single massive tool result turn)
-        preserving head (10,000 chars for tool) and tail (5,000 chars for tool)
-        with an informative truncation notice.
+        preserving head and tail with an informative truncation notice.
+        Scales clamp limits proportionally for tight context budgets (e.g. 8k models).
         """
         if not msg.content or not isinstance(msg.content, str):
             return msg
 
-        limit = max_tool_chars if msg.role == "tool" else max_other_chars
+        is_tight_budget = self.max_tokens <= 16384
+        if is_tight_budget:
+            limit = 1800 if msg.role == "tool" else 3600
+            head_len = 1200 if msg.role == "tool" else 2400
+            tail_len = 600 if msg.role == "tool" else 1200
+        else:
+            limit = max_tool_chars if msg.role == "tool" else max_other_chars
+            head_len = 10000 if msg.role == "tool" else 20000
+            tail_len = 5000 if msg.role == "tool" else 10000
+
         if len(msg.content) <= limit:
             return msg
 
-        head_len = 10000 if msg.role == "tool" else 20000
-        tail_len = 5000 if msg.role == "tool" else 10000
         omitted = len(msg.content) - (head_len + tail_len)
         if omitted <= 0:
             return msg
@@ -327,13 +338,20 @@ class ContextCompressor:
             tail_start = max(head_end, total_msgs - self.tail_turns)
 
         # 3. Tool Integrity Enforcement:
-        # If the first message of Tail is a 'tool' role, its parent 'assistant' message
+        # A. Ensure Head does not separate an assistant tool-call turn from its tool response messages
+        while head_end < total_msgs and clamped_messages[head_end].role == "tool":
+            head_end += 1
+
+        # B. If the first message of Tail is a 'tool' role, its parent 'assistant' message
         # containing the tool_calls definition must NOT be cut off into middle,
         # otherwise upstream LLM APIs (OpenAI/Groq/Gemini) throw an unrecoverable 400.
         while tail_start > head_end and clamped_messages[tail_start].role == "tool":
             tail_start -= 1
             if tail_start > head_end and clamped_messages[tail_start].tool_calls:
                 break
+
+        if head_end >= tail_start:
+            return clamped_messages
 
         tail = clamped_messages[tail_start:]
         middle = clamped_messages[head_end:tail_start]

@@ -78,9 +78,12 @@ def _clean_text(text: str) -> str:
 @tool(
     name="web_search",
     description=(
-        "Search the web for current information. Returns up to max_results structured results "
-        "with title, URL, and snippet. Use for finding facts, documentation, news, or any "
-        "information not in your training data. Faster than browser automation."
+        "Search the web for current information using Tavily (primary) or DuckDuckGo (fallback). "
+        "Returns structured results: title, URL, snippet. "
+        "PREFER THIS for: facts, documentation, news, research, general lookups — it is fast and cheap. "
+        "USE browser_interact INSTEAD when: the site requires login, blocks static fetches "
+        "(Amazon/Flipkart product pages), or you need to click/scroll/interact with the page. "
+        "Never use this to 'verify' a price — always visit the live store page."
     ),
     tags=["web", "search", "internet", "research"],
 )

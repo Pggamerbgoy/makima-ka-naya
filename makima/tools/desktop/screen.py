@@ -42,6 +42,10 @@ def _capture_hwnd_to_image(hwnd: int) -> tuple[Image.Image | None, str | None]:
     if not win32gui.IsWindow(hwnd):
         return None, f"Invalid window handle (HWND: {hwnd})"
 
+    hwndDC = None
+    mfcDC = None
+    saveDC = None
+    saveBitMap = None
     try:
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         width = max(1, right - left)
@@ -73,16 +77,32 @@ def _capture_hwnd_to_image(hwnd: int) -> tuple[Image.Image | None, str | None]:
             1,
         )
 
-        # Cleanup GDI resources
-        win32gui.DeleteObject(saveBitMap.GetHandle())
-        saveDC.DeleteDC()
-        mfcDC.DeleteDC()
-        win32gui.ReleaseDC(hwnd, hwndDC)
-
         return img, None
     except Exception as exc:
         logger.exception("Failed capturing HWND %s: %s", hwnd, exc)
         return None, str(exc)
+    finally:
+        # Safe cleanup of all Win32 GDI resources
+        if saveBitMap is not None:
+            try:
+                win32gui.DeleteObject(saveBitMap.GetHandle())
+            except Exception:
+                pass
+        if saveDC is not None:
+            try:
+                saveDC.DeleteDC()
+            except Exception:
+                pass
+        if mfcDC is not None:
+            try:
+                mfcDC.DeleteDC()
+            except Exception:
+                pass
+        if hwndDC is not None:
+            try:
+                win32gui.ReleaseDC(hwnd, hwndDC)
+            except Exception:
+                pass
 
 
 @tool(

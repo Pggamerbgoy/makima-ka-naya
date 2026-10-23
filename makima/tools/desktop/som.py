@@ -138,6 +138,14 @@ def annotate_window_som(
         mark_id = mark_count
         color = BADGE_COLORS[(mark_id - 1) % len(BADGE_COLORS)]
 
+        # Black out password fields on the screenshot for zero visual credential leakage
+        is_pwd = bool(elem.get("is_password", False)) or (
+            "password" in str(elem.get("control_type", "")).lower()
+            or "password" in str(elem.get("name", "")).lower()
+        )
+        if is_pwd:
+            draw.rectangle([rx, ry, rx + rw, ry + rh], fill="black")
+
         # Draw bounding outline
         draw.rectangle([rx, ry, rx + rw, ry + rh], outline=color, width=2)
 

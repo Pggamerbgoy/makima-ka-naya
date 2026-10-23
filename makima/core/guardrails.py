@@ -70,6 +70,9 @@ class Guardrails:
         re.compile(r"\bgho_[a-zA-Z0-9]{36}\b"),       # GitHub OAuth Token
         re.compile(r"\bxox[baprs]-[a-zA-Z0-9-]{10,}\b"), # Slack Token
         re.compile(r"\bsk-ant-[a-zA-Z0-9_-]{20,}\b"), # Anthropic API Key
+        re.compile(r"\bAKIA[0-9A-Z]{16}\b"),          # AWS Access Key ID
+        re.compile(r"-----BEGIN (?:[A-Z0-9_-]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9_-]+ )?PRIVATE KEY-----"), # Private Keys
+        re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), # JWT Tokens
     ]
 
     # Tools that execute commands or code and require safety interception
@@ -103,6 +106,32 @@ class Guardrails:
             for pattern, reason in self.DANGEROUS_COMMAND_PATTERNS
         ]
 
+        # Initialize Microsoft Presidio Anonymizer & Pattern Recognizers (Zero-Model Mode)
+        self._presidio_anonymizer = None
+        self._presidio_recognizers = []
+        try:
+            from presidio_analyzer.predefined_recognizers import (
+                CreditCardRecognizer,
+                CryptoRecognizer,
+                EmailRecognizer,
+                IbanRecognizer,
+                IpRecognizer,
+                PhoneRecognizer,
+            )
+            from presidio_anonymizer import AnonymizerEngine
+
+            self._presidio_anonymizer = AnonymizerEngine()
+            self._presidio_recognizers = [
+                CreditCardRecognizer(),
+                EmailRecognizer(),
+                PhoneRecognizer(),
+                CryptoRecognizer(),
+                IpRecognizer(),
+                IbanRecognizer(),
+            ]
+        except Exception as exc:
+            logger.debug("Presidio engine initialization notice: %s", exc)
+
     def is_dangerous_command(self, command: str) -> Tuple[bool, Optional[str]]:
         """
         Scans a shell command or SQL statement against dangerous patterns.
@@ -130,11 +159,11 @@ class Guardrails:
                 f"Command: '{command[:80]}...'"
             )
 
-    def validate_tool_call(self, tool_name: str, arguments: Dict[str, Any]) -> None:
+    def validate_tool_call(self, tool_name: str, arguments: Any) -> None:
         """
         Intercepts tool call arguments and applies safety checks before dispatch.
         """
-        if not self.block_dangerous_commands:
+        if not self.block_dangerous_commands or not isinstance(arguments, dict):
             return
 
         tool_clean = tool_name.lower().strip()
@@ -187,19 +216,35 @@ class Guardrails:
 
     def filter_secrets(self, text: Optional[str]) -> str:
         """
-        Scans text for secrets (known regex patterns and high-entropy tokens)
-        and redacts them with [REDACTED_SECRET].
+        Scans text for PII (credit cards, phones, emails, IPs via Microsoft Presidio)
+        and secrets (known regex patterns and high-entropy tokens)
+        and redacts them with appropriate privacy placeholders and [REDACTED_SECRET].
         """
         if not text or not self.redact_secrets_enabled:
             return text or ""
 
         result = text
 
-        # 1. Regex pattern redaction for known provider key signatures
+        # 1. Microsoft Presidio PII anonymization (Credit Cards, Emails, Phones, Crypto, IPs, IBANs)
+        if self._presidio_anonymizer and self._presidio_recognizers:
+            try:
+                all_pii = []
+                for r in self._presidio_recognizers:
+                    res = r.analyze(text=result, entities=r.supported_entities)
+                    if res:
+                        all_pii.extend(res)
+                if all_pii:
+                    result = self._presidio_anonymizer.anonymize(
+                        text=result, analyzer_results=all_pii
+                    ).text
+            except Exception as exc:
+                logger.debug("Presidio PII anonymization pass notice: %s", exc)
+
+        # 2. Regex pattern redaction for known provider key signatures
         for pattern in self.SECRET_REGEX_PATTERNS:
             result = pattern.sub("[REDACTED_SECRET]", result)
 
-        # 2. Entropy-based token redaction
+        # 3. Entropy-based token redaction
         # Scan words with length >= min_secret_length that are alphanumeric / key-like
         words = re.findall(r"\b[A-Za-z0-9_\-\.]{16,}\b", result)
         for word in words:
@@ -239,3 +284,7 @@ _DEFAULT_GUARDRAILS = Guardrails()
 def filter_secrets(text: Optional[str]) -> str:
     """Convenience helper to redact secrets from text."""
     return _DEFAULT_GUARDRAILS.filter_secrets(text)
+
+
+# Alias for semantic telemetry masking
+mask_sensitive_data = filter_secrets

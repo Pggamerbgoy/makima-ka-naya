@@ -91,16 +91,22 @@ class VectorSearchEngine:
     DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     VECTOR_DIM = 384  # dimension for MiniLM-L12
 
+    # In-memory LRU embedding cache to eliminate redundant inference
+    _EMBED_CACHE: Dict[str, List[float]] = {}
+    _CACHE_MAX_SIZE: int = 1000
+
     def __init__(
         self,
         db_path: Optional[Union[Path, str]] = None,
-        model_name: str = DEFAULT_MODEL,
+        model_name: Optional[str] = None,
+        vector_dim: Optional[int] = None,
     ) -> None:
         """
         Args:
             db_path: Path to the SQLite vector store. Defaults to
                      ~/.makima/state/vector_store.db, or ':memory:' for tests.
-            model_name: fastembed model name. Defaults to multilingual MiniLM-L12.
+            model_name: fastembed model name. Defaults dynamically to settings.yaml.
+            vector_dim: Vector dimensions. Defaults dynamically to settings.yaml (384).
         """
         if db_path is None:
             try:
@@ -116,7 +122,20 @@ class VectorSearchEngine:
         else:
             self.db_path = Path(db_path)
 
-        self.model_name = model_name
+        # Dynamic model & dimension configuration
+        if model_name is None or vector_dim is None:
+            try:
+                from makima.config import get_settings
+                settings = get_settings()
+                self.model_name = model_name or getattr(settings.memory.vector_search, "embedding_model", self.DEFAULT_MODEL)
+                self.vector_dim = vector_dim or getattr(settings.memory.vector_search, "dimension", self.VECTOR_DIM)
+            except Exception:
+                self.model_name = model_name or self.DEFAULT_MODEL
+                self.vector_dim = vector_dim or self.VECTOR_DIM
+        else:
+            self.model_name = model_name
+            self.vector_dim = vector_dim
+
         self._conn: Optional[sqlite3.Connection] = None
         self._embedder: Optional[Any] = None
         self._lock = asyncio.Lock()
@@ -140,6 +159,18 @@ class VectorSearchEngine:
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             conn.row_factory = sqlite3.Row
 
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS doc_metadata (
+                    doc_id         TEXT PRIMARY KEY,
+                    text           TEXT NOT NULL,
+                    metadata       TEXT,
+                    embedding_json TEXT
+                );
+                """
+            )
+
             if _HAS_SQLITE_VEC:
                 # Load sqlite-vec extension
                 conn.enable_load_extension(True)
@@ -150,29 +181,31 @@ class VectorSearchEngine:
                     f"""
                     CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
                         doc_id TEXT PRIMARY KEY,
-                        embedding FLOAT[{self.VECTOR_DIM}]
+                        embedding FLOAT[{self.vector_dim}]
                     );
                     """
                 )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS doc_metadata (
-                        doc_id   TEXT PRIMARY KEY,
-                        text     TEXT NOT NULL,
-                        metadata TEXT
-                    );
-                    """
-                )
-                conn.commit()
                 logger.info(
                     f"VectorSearchEngine connected (sqlite-vec {sqlite_vec.__version__}) "  # type: ignore[union-attr]
                     f"→ {self.db_path}"
                 )
             else:
+                # Load persisted vectors from disk into fallback memory on startup
+                rows = conn.execute("SELECT doc_id, text, metadata, embedding_json FROM doc_metadata;").fetchall()
+                self._fallback_docs = [
+                    {
+                        "id": r["doc_id"],
+                        "text": r["text"],
+                        "vector": json.loads(r["embedding_json"]) if r["embedding_json"] else [],
+                        "metadata": json.loads(r["metadata"]) if r["metadata"] else None,
+                    }
+                    for r in rows if r["embedding_json"]
+                ]
                 logger.info(
-                    f"VectorSearchEngine connected (fallback cosine mode) → {self.db_path}"
+                    f"VectorSearchEngine connected (fallback cosine mode with {len(self._fallback_docs)} persisted docs) → {self.db_path}"
                 )
 
+            conn.commit()
             self._conn = conn
 
     def _get_embedder(self) -> Any:
@@ -188,9 +221,33 @@ class VectorSearchEngine:
         return self._embedder
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
-        """Generates embeddings synchronously (fastembed is sync)."""
-        embedder = self._get_embedder()
-        return [list(map(float, v)) for v in embedder.embed(texts)]
+        """Generates embeddings synchronously with in-memory LRU caching."""
+        results: List[Optional[List[float]]] = [None] * len(texts)
+        missing_indices: List[int] = []
+        missing_texts: List[str] = []
+
+        for idx, t in enumerate(texts):
+            cached = self._EMBED_CACHE.get(t)
+            if cached is not None:
+                results[idx] = cached
+            else:
+                missing_indices.append(idx)
+                missing_texts.append(t)
+
+        if missing_texts:
+            embedder = self._get_embedder()
+            computed = [list(map(float, v)) for v in embedder.embed(missing_texts)]
+            for idx, text, vec in zip(missing_indices, missing_texts, computed):
+                results[idx] = vec
+                if len(self._EMBED_CACHE) >= self._CACHE_MAX_SIZE:
+                    try:
+                        first_k = next(iter(self._EMBED_CACHE))
+                        self._EMBED_CACHE.pop(first_k, None)
+                    except StopIteration:
+                        pass
+                self._EMBED_CACHE[text] = vec
+
+        return [r for r in results if r is not None]
 
     # ------------------------------------------------------------------
     # Core Operations
@@ -236,15 +293,25 @@ class VectorSearchEngine:
                 )
                 conn.execute(
                     """
-                    INSERT INTO doc_metadata (doc_id, text, metadata)
-                    VALUES (?, ?, ?)
+                    INSERT INTO doc_metadata (doc_id, text, metadata, embedding_json)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT(doc_id) DO UPDATE SET text=excluded.text, metadata=excluded.metadata;
                     """,
-                    (doc_id, text, metadata_str),
+                    (doc_id, text, metadata_str, None),
                 )
                 conn.commit()
             else:
-                # Fallback: in-memory list
+                # Fallback: in-memory list + persistent SQLite storage
+                embedding_json = json.dumps(vec)
+                conn.execute(
+                    """
+                    INSERT INTO doc_metadata (doc_id, text, metadata, embedding_json)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(doc_id) DO UPDATE SET text=excluded.text, metadata=excluded.metadata, embedding_json=excluded.embedding_json;
+                    """,
+                    (doc_id, text, metadata_str, embedding_json),
+                )
+                conn.commit()
                 self._fallback_docs = [d for d in self._fallback_docs if d["id"] != doc_id]
                 self._fallback_docs.append(
                     {"id": doc_id, "text": text, "vector": vec, "metadata": metadata}
@@ -295,10 +362,9 @@ class VectorSearchEngine:
 
                 results = []
                 for row in rows:
-                    # sqlite-vec distance is L2; convert to similarity score
-                    # distance=0 → score=1.0, clipped at 0
+                    # For normalized vectors: cosine_sim = 1 - (L2_distance^2) / 2
                     dist = float(row["distance"])
-                    score = max(0.0, 1.0 - dist / 2.0)
+                    score = max(0.0, 1.0 - (dist * dist) / 2.0)
                     if score < min_score:
                         continue
                     meta = None

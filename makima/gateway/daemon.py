@@ -42,9 +42,11 @@ class GatewayDaemon:
         self.engine = engine
 
         self._adapters: Dict[str, Any] = {}
+        self._adapter_tasks: Dict[str, asyncio.Task] = {}
         self._is_running = False
         self._shutdown_event = asyncio.Event()
         self._signal_handlers_registered = False
+        self._sentinel_event_daemon: Optional[Any] = None
 
     @property
     def is_running(self) -> bool:
@@ -112,6 +114,40 @@ class GatewayDaemon:
         # 1. Start job scheduler
         self.scheduler.start()
 
+        # 1a. Register Sentinel background jobs (observer, habit engine, proactive daemon)
+        try:
+            from makima.sentinel.observer import take_snapshot
+            from makima.sentinel.habit_engine import run_habit_analysis
+            from makima.sentinel.proactive_daemon import evaluate_and_act
+
+            self.scheduler.schedule_cron(
+                job_id="sentinel_observer",
+                cron_expr="* * * * *",   # every minute (60s)
+                callback=take_snapshot,
+            )
+            self.scheduler.schedule_cron(
+                job_id="habit_engine_daily",
+                cron_expr="0 3 * * *",   # 3:00 AM daily
+                callback=run_habit_analysis,
+            )
+            self.scheduler.schedule_cron(
+                job_id="proactive_daemon",
+                cron_expr="*/5 * * * *", # every 5 minutes
+                callback=evaluate_and_act,
+            )
+            logger.info("Sentinel jobs registered: observer (60s), habit_engine (3am), proactive_daemon (5min)")
+        except Exception as _sentinel_err:
+            logger.warning("Sentinel jobs could not be registered: %s", _sentinel_err)
+
+        # 1b. Start Sentinel Event-Driven Daemon ("The Listening Devil")
+        try:
+            from makima.sentinel.event_daemon import SentinelEventDaemon
+            self._sentinel_event_daemon = SentinelEventDaemon()
+            self._sentinel_event_daemon.start()
+            logger.info("Sentinel Event-Driven Daemon ('The Listening Devil') started successfully.")
+        except Exception as _devil_err:
+            logger.warning("Sentinel event daemon could not be started: %s", _devil_err)
+
         # 2. Check if initial pairing code is needed
         if self.security.pairing_code_enabled and not self.security.allow_all_users:
             authorized = self.security.list_authorized_users()
@@ -121,7 +157,7 @@ class GatewayDaemon:
                 code = self.security.generate_pairing_code()
                 logger.info(f"Initial gateway pairing code generated: {code}")
 
-        # 3. Start registered adapters
+        # 3. Start registered adapters with error isolation
         for name, adapter in self._adapters.items():
             if hasattr(adapter, "start") and callable(adapter.start):
                 logger.info(f"Starting adapter '{name}'...")
@@ -144,7 +180,15 @@ class GatewayDaemon:
 
         logger.info("Stopping Makima Gateway Daemon...")
 
-        # 1. Stop all registered adapters in reverse order
+        # 1. Cancel and drain adapter supervisor tasks
+        for task in self._adapter_tasks.values():
+            if not task.done():
+                task.cancel()
+        if self._adapter_tasks:
+            await asyncio.gather(*self._adapter_tasks.values(), return_exceptions=True)
+            self._adapter_tasks.clear()
+
+        # 2. Stop all registered adapters in reverse order
         for name, adapter in reversed(list(self._adapters.items())):
             if hasattr(adapter, "stop") and callable(adapter.stop):
                 logger.info(f"Stopping adapter '{name}'...")
@@ -161,6 +205,14 @@ class GatewayDaemon:
             await asyncio.sleep(0.01)
         except Exception as e:
             logger.warning(f"Error during scheduler shutdown: {e}")
+
+        # 3. Stop Sentinel event daemon
+        if self._sentinel_event_daemon is not None:
+            try:
+                self._sentinel_event_daemon.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping Sentinel event daemon: {e}")
+            self._sentinel_event_daemon = None
 
         self._is_running = False
         self._shutdown_event.set()

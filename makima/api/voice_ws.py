@@ -78,6 +78,10 @@ async def voice_bridge(websocket: WebSocket) -> None:
                 await send_json({"type": "voice_error", "message": "Malformed voice control message."})
                 continue
 
+            if not isinstance(payload, dict):
+                await send_json({"type": "voice_error", "message": "Voice control message must be a JSON object."})
+                continue
+
             event_type = payload.get("type")
             if event_type == "start":
                 if session and session.is_active:
@@ -90,12 +94,23 @@ async def voice_bridge(websocket: WebSocket) -> None:
                 try:
                     await session.connect()
                     receive_task = asyncio.create_task(forward_events(session))
+                    from makima.sentinel.event_daemon import get_sentinel_daemon
+                    sentinel = get_sentinel_daemon()
+                    if sentinel:
+                        sentinel.set_live_dispatcher(
+                            session.send_text_prompt,
+                            loop=asyncio.get_running_loop(),
+                        )
                     await send_json({"type": "voice_ready", "model": session.model, "voice_name": session.voice_name})
                 except Exception as exc:
                     await send_json({"type": "voice_error", "message": str(exc)})
                     await session.close()
                     session = None
             elif event_type == "stop":
+                from makima.sentinel.event_daemon import get_sentinel_daemon
+                sentinel = get_sentinel_daemon()
+                if sentinel:
+                    sentinel.set_live_dispatcher(None)
                 if receive_task:
                     receive_task.cancel()
                     await asyncio.gather(receive_task, return_exceptions=True)
@@ -113,6 +128,10 @@ async def voice_bridge(websocket: WebSocket) -> None:
     except Exception as exc:
         logger.exception("Voice WebSocket failed: %s", exc)
     finally:
+        from makima.sentinel.event_daemon import get_sentinel_daemon
+        sentinel = get_sentinel_daemon()
+        if sentinel:
+            sentinel.set_live_dispatcher(None)
         if receive_task:
             receive_task.cancel()
             await asyncio.gather(receive_task, return_exceptions=True)

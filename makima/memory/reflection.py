@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set, Tuple
 
 from makima.memory.state import StateMemory
 from makima.provider.adapters.base import Message
@@ -79,6 +79,21 @@ class ImplicitPreferenceLearner:
             ),
             "name",
         ),
+        # Natural Consumption/Tool Habits: "mai anime miruro.ru pe dekhta hu", "mai music spotify par sunta hu"
+        (
+            re.compile(
+                r"(?:mai|main)\s+([^,.\n]+?)\s+([a-zA-Z0-9_.\-]+(?:\.[a-zA-Z]{2,})?)\s+(?:pe|par|me|mein)\s+(?:dekhta|dekhti|sunta|sunti|padhta|padhti|likhta|likhti|chalaata|chalaati|karta|karti)\s+hu(?:\s+(?:for\s+now|abhi\s+ke\s+liye))?",
+                re.IGNORECASE,
+            ),
+            "consumption_habit_1",
+        ),
+        (
+            re.compile(
+                r"(?:mai|main)\s+([a-zA-Z0-9_.\-]+(?:\.[a-zA-Z]{2,})?)\s+(?:pe|par|me|mein)\s+([^,.\n]+?)\s+(?:dekhta|dekhti|sunta|sunti|padhta|padhti|likhta|likhti|chalaata|chalaati|karta|karti)\s+hu(?:\s+(?:for\s+now|abhi\s+ke\s+liye))?",
+                re.IGNORECASE,
+            ),
+            "consumption_habit_2",
+        ),
     ]
 
     # Class-level deduplication guard — prevents race condition when multiple
@@ -86,12 +101,19 @@ class ImplicitPreferenceLearner:
     # any write completes (root cause of duplicate entries like "9anime x9")
     _seen_prefs: Set[str] = set()
     _write_lock: Optional[asyncio.Lock] = None
+    _write_lock_loop: Optional[Any] = None
 
     @classmethod
     def _get_write_lock(cls) -> asyncio.Lock:
-        """Lazily creates the asyncio.Lock (event loop must exist at call time)."""
-        if cls._write_lock is None:
+        """Lazily creates the asyncio.Lock, re-creating if event loop has changed."""
+        try:
+            curr_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            curr_loop = None
+
+        if cls._write_lock is None or cls._write_lock_loop != curr_loop:
             cls._write_lock = asyncio.Lock()
+            cls._write_lock_loop = curr_loop
         return cls._write_lock
 
     # Transient command blacklist — skip temporary commands that look like preferences
@@ -124,7 +146,7 @@ class ImplicitPreferenceLearner:
         r"prefer|prefers|preferred|rather|instead|actually|wrong|always|never|"
         r"default|favorite|favourite|usually|normally|habit|style|tone|format|"
         r"concise|brief|detailed|hinglish|hindi|english|"
-        r"pasand|hamesha|kabhi|chahiye|rakhna|rakho|"
+        r"pasand|hamesha|kabhi|chahiye|rakhna|rakho|dekhta|dekhti|sunta|sunti|chalaata|chalaati|"
         r"don't|dont|do\s+not|avoid|switch\s+to|"
         r"mat\s+(?:karo|karna|kholo|kholna|chala|chalana|likho|likhna|bolo|bolna|use)|"
         r"(?:diya|kiya|bola|likha|bheja|use\s+kiya)\s+karo|"
@@ -204,6 +226,18 @@ class ImplicitPreferenceLearner:
                 name = groups[0]
                 return f"Name is {name}"
 
+            # Case: Consumption habit "mai anime miruro.ru pe dekhta hu"
+            elif pattern_type == "consumption_habit_1":
+                cat = groups[0].strip()
+                platform = groups[1].strip()
+                return f"Watches/uses {platform} for {cat}"
+
+            # Case: Consumption habit "mai miruro.ru pe anime dekhta hu"
+            elif pattern_type == "consumption_habit_2":
+                platform = groups[0].strip()
+                cat = groups[1].strip()
+                return f"Watches/uses {platform} for {cat}"
+
         return None
 
     def is_already_known(self, candidate_pref: str) -> bool:
@@ -240,6 +274,7 @@ class ImplicitPreferenceLearner:
         self,
         user_message: str,
         assistant_response: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Optional[str]:
         """
         Asynchronous LLM-based reflection fallback for ambiguous corrections or nuanced phrasing.
@@ -269,13 +304,16 @@ class ImplicitPreferenceLearner:
         prompt = f"User said: {user_message}\nAssistant replied: {(assistant_response or '')[:300]}"
 
         try:
-            res = await self.router.execute_with_fallback(
-                task="fast_chat",
-                messages=[Message(role="user", content=prompt)],
-                system_prompt=system_prompt,
-                temperature=0.0,
-                max_tokens=150,
-            )
+            call_kwargs = {
+                "task": "fast_chat",
+                "messages": [Message(role="user", content=prompt)],
+                "system_prompt": system_prompt,
+                "temperature": 0.0,
+                "max_tokens": 150,
+            }
+            if model:
+                call_kwargs["model"] = model
+            res = await self.router.execute_with_fallback(**call_kwargs)
             content = res.content.strip()
             # Extract JSON block
             if "{" in content and "}" in content:
@@ -334,7 +372,16 @@ class ImplicitPreferenceLearner:
             self.__class__._seen_prefs.add(norm)
 
             try:
-                self.state_memory.append_user_profile(learned)
+                # Contradiction cleanup: "Prefers Y instead of X" -> remove old X preference
+                if " instead of " in norm:
+                    old_target = learned.split(" instead of ")[-1].strip()
+                    if old_target:
+                        await asyncio.to_thread(self.state_memory.delete_user_preference, old_target)
+                elif norm.startswith("name is "):
+                    await asyncio.to_thread(self.state_memory.delete_user_preference, "**Name**:")
+                    await asyncio.to_thread(self.state_memory.delete_user_preference, "Name is ")
+
+                await self.state_memory.append_user_profile_async(learned)
                 logger.info(f"Autonomously learned and saved user preference: '{learned}'")
                 return learned
             except Exception as e:
@@ -342,3 +389,74 @@ class ImplicitPreferenceLearner:
                 self.__class__._seen_prefs.discard(norm)
                 logger.error(f"Failed to persist learned preference '{learned}': {e}")
                 return None
+
+    def ingest_habits(self, habits_json_path) -> int:
+        """
+        Reads HABITS.json from the Sentinel engine and appends confirmed habits
+        as preference entries in USER.md via StateMemory.
+        Synchronous — safe to call from APScheduler background jobs.
+        Returns the count of newly written habit entries.
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        path = _Path(habits_json_path)
+        if not path.exists():
+            logger.debug("ingest_habits: HABITS.json not found at %s", path)
+            return 0
+
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("ingest_habits: Could not read HABITS.json: %s", exc)
+            return 0
+
+        written = 0
+        try:
+            profile_lines = self.state_memory.read_user_profile().splitlines()
+        except Exception:
+            profile_lines = []
+
+        for habit in data.get("habits", []):
+            if not habit.get("confirmed"):
+                continue
+            label = habit.get("label", "")
+            apps = habit.get("apps", [])
+            weekdays = habit.get("weekdays", [])
+            hour_start = habit.get("hour_start", -1)
+
+            if not label:
+                continue
+
+            # Build a human-readable preference string
+            days_str = ", ".join(weekdays) if weekdays else "weekdays"
+            app_str = apps[0].replace(".exe", "") if apps else "unknown app"
+            pref = f"Daily habit: Uses {app_str} on {days_str} around {hour_start:02d}:00 ({label})"
+
+            norm = pref.lower().strip()
+            if norm in self.__class__._seen_prefs:
+                continue
+
+            # Check if this specific habit (app + hour) already exists in USER.md
+            already_present = False
+            for line in profile_lines:
+                ll = line.lower()
+                if "daily habit" in ll and app_str.lower() in ll and f"{hour_start:02d}:00" in ll:
+                    already_present = True
+                    break
+
+            if already_present:
+                self.__class__._seen_prefs.add(norm)
+                continue
+
+            try:
+                self.state_memory.append_user_profile(pref)
+                self.__class__._seen_prefs.add(norm)
+                profile_lines.append(f"- {pref}")
+                logger.info("ingest_habits: Persisted habit preference — %s", pref)
+                written += 1
+            except Exception as exc:
+                logger.error("ingest_habits: Failed to write '%s': %s", pref, exc)
+
+        return written
+

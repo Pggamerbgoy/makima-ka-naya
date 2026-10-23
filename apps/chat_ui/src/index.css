@@ -933,6 +933,371 @@ html, body, #root { overflow-x: hidden; }
   color: var(--text);
 }
 
+/* ==========================================================================
+   Claude-style Collapsible Execution Stepper & Live Progress
+   ========================================================================== */
+
+.execution-steps-accordion {
+  margin: 6px 0 14px 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-2) 65%, rgba(0, 0, 0, 0.2));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  overflow: hidden;
+  transition: all 180ms ease;
+  width: 100%;
+}
+
+.execution-steps-accordion:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.execution-steps-accordion.has-failure {
+  border-color: rgba(244, 63, 94, 0.45);
+  background: color-mix(in srgb, rgba(244, 63, 94, 0.08) 30%, var(--panel-2));
+}
+
+.execution-steps-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  transition: background 140ms ease;
+  user-select: none;
+}
+
+.execution-steps-summary:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.summary-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.summary-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.execution-steps-accordion.has-failure .summary-icon {
+  color: #fb7185;
+}
+
+.summary-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.execution-steps-accordion.has-failure .summary-title {
+  color: #fda4af;
+}
+
+.summary-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+}
+
+.summary-tool-pill {
+  font-size: 10.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding: 1.5px 7px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.summary-duration-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.8;
+  padding: 1.5px 6px;
+  border-radius: 99px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.summary-chevron {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+.summary-chevron.open {
+  transform: rotate(180deg);
+}
+
+.execution-steps-body {
+  padding: 8px 12px 12px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: rgba(0, 0, 0, 0.12);
+  animation: fadeIn 150ms ease-out both;
+}
+
+/* Timeline Layout */
+.execution-timeline {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding-left: 6px;
+}
+
+.execution-timeline::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 17px;
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.execution-steps-live {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0;
+  width: 100%;
+}
+
+.execution-timeline.live::before {
+  bottom: 10px;
+}
+
+.step-timeline-item {
+  display: flex;
+  gap: 10px;
+  position: relative;
+  padding: 5px 0;
+}
+
+.step-timeline-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 1;
+  transition: all 160ms ease;
+}
+
+.step-timeline-icon.completed {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: color-mix(in srgb, rgba(16, 185, 129, 0.12) 30%, var(--panel));
+  color: #10b981;
+}
+
+.step-timeline-icon.failed {
+  border-color: rgba(244, 63, 94, 0.5);
+  background: color-mix(in srgb, rgba(244, 63, 94, 0.15) 30%, var(--panel));
+  color: #f43f5e;
+}
+
+.step-timeline-icon.running {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+}
+
+.step-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.step-timeline-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.step-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+
+.step-main-row.clickable {
+  cursor: pointer;
+}
+
+.step-main-row.clickable:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.step-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.step-type-icon {
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.step-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text);
+}
+
+.step-arg-summary {
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-thought-snippet {
+  font-size: 11px;
+  font-style: italic;
+  color: color-mix(in srgb, var(--text) 70%, var(--muted));
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-meta-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.step-duration {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.step-badge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.step-badge.running {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.step-badge.error {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+}
+
+.step-details-toggle {
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 160ms ease;
+}
+
+.step-details-toggle.open {
+  transform: rotate(180deg);
+}
+
+.step-details-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  animation: fadeIn 140ms ease-out both;
+}
+
+.step-details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.step-section-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.step-section-label.error {
+  color: #fb7185;
+}
+
+.step-code {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  max-height: 220px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.step-code.error {
+  color: #fca5a5;
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+}
+
+
 
 
 

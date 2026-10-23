@@ -423,6 +423,7 @@ async def execute_agent_turn(
     task: str,
     console: Console,
     use_markdown: bool = True,
+    max_turns: Optional[int] = None,
 ) -> bool:
     """
     Executes a single turn of the HermesAgentEngine, dynamically updating a Rich spinner
@@ -444,6 +445,7 @@ async def execute_agent_turn(
                 messages=conversation_history if conversation_history else None,
                 tools=registry,
                 task=task,
+                max_turns=max_turns,
                 on_turn_end=on_turn_end,
             )
 
@@ -511,6 +513,7 @@ def chat_command(
     task = getattr(args, "task", "fast_chat") or "fast_chat"
     use_markdown = not getattr(args, "no_markdown", False)
     single_message = getattr(args, "message", None)
+    max_turns = getattr(args, "max_turns", None)
 
     # 1. Single message mode (non-interactive)
     if single_message:
@@ -523,6 +526,7 @@ def chat_command(
                 task=task,
                 console=console,
                 use_markdown=use_markdown,
+                max_turns=max_turns,
             )
         )
         return 0 if success else 1
@@ -598,6 +602,7 @@ def chat_command(
                 task=task,
                 console=console,
                 use_markdown=use_markdown,
+                max_turns=max_turns,
             )
         )
 

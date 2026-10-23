@@ -78,16 +78,16 @@ export function ModelPicker({ backends, activeBackend, onSelect, disabled = fals
     for (const backend of filtered) {
       let groupKey = backend.adapter || 'other';
       const idLower = backend.id.toLowerCase();
-      if (idLower.includes('qwen') || idLower.includes('alibaba')) {
-        groupKey = 'dashscope';
-      } else if (idLower.includes('groq')) {
+      if (idLower.startsWith('groq') || idLower.includes('_groq_') || backend.adapter === 'groq') {
         groupKey = 'groq';
-      } else if (idLower.includes('gemini')) {
-        groupKey = 'gemini';
-      } else if (idLower.includes('ollama')) {
-        groupKey = 'ollama';
-      } else if (idLower.includes('openrouter')) {
+      } else if (idLower.startsWith('openrouter') || backend.adapter === 'openrouter') {
         groupKey = 'openrouter';
+      } else if (idLower.startsWith('gemini') || idLower.includes('google') || backend.adapter === 'gemini') {
+        groupKey = 'gemini';
+      } else if (idLower.startsWith('ollama') || backend.adapter === 'ollama') {
+        groupKey = 'ollama';
+      } else if (idLower.includes('dashscope') || idLower.includes('alibaba') || idLower.includes('qwen')) {
+        groupKey = 'dashscope';
       }
 
       const groupName = PROVIDER_NAMES[groupKey] || (groupKey.charAt(0).toUpperCase() + groupKey.slice(1));

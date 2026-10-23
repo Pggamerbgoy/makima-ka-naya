@@ -108,11 +108,18 @@ class MakimaOSWorldAgent:
         engine: HermesAgentEngine,
         registry: ToolRegistry,
         *,
-        task_cascade: str = "fast_chat",
+        task_cascade: Optional[str] = None,
         max_turns: int = 15,
     ) -> None:
         self.engine = engine
         self.registry = registry
+        if task_cascade is None:
+            try:
+                from makima.config import get_settings
+                s = get_settings()
+                task_cascade = "osworld" if "osworld" in s.providers.cascades else "fast_chat"
+            except Exception:
+                task_cascade = "osworld"
         self.task_cascade = task_cascade
         self.max_turns = max_turns
         self._last_run: Optional[OSWorldRun] = None

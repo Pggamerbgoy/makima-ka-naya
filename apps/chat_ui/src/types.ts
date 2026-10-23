@@ -13,6 +13,20 @@ export type Artifact = {
   metadata?: Record<string, unknown>;
 };
 
+export type ExecutionStep = {
+  id: string;
+  type: 'tool' | 'thought' | 'status';
+  name?: string;
+  stage?: string;
+  arguments?: Record<string, unknown> | string;
+  result?: unknown;
+  status: 'running' | 'completed' | 'failed';
+  error?: string;
+  timestamp?: number;
+  duration_ms?: number;
+  durationMs?: number;
+};
+
 export type Backend = {
   id: string; model: string; adapter: string; available: boolean; status: string;
   quota_exhausted?: boolean; circuit_breaker?: string; latency_tier?: string; latency_ms?: number;

@@ -13,7 +13,7 @@ import { useMakimaSocket, type ConnectionState } from './hooks/useMakimaSocket';
 import { clearSession, loadSession as loadPersistedSession, saveSession } from './session';
 import { launchConfetti } from './utils/confetti';
 import { playChime, playWhoosh } from './utils/soundEffects';
-import type { Artifact, Backend, Connector, SessionSummary, StreamEvent, SystemStatus, ToolInfo, UiSettings } from './types';
+import type { Artifact, Backend, Connector, ExecutionStep, SessionSummary, StreamEvent, SystemStatus, ToolInfo, UiSettings } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import './index.css';
 
@@ -66,7 +66,19 @@ const FLOATING_KEYWORDS = [
 
 
 export type ChatAttachment = { id: string; name: string; mimeType: string; size: number; textPreview?: string };
-type Message = { id: string; role: 'user' | 'assistant'; content: string; attachments?: ChatAttachment[]; artifacts?: Artifact[]; pending?: boolean; error?: string; createdAt?: number; suggestions?: string[] };
+type Message = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  attachments?: ChatAttachment[];
+  artifacts?: Artifact[];
+  pending?: boolean;
+  error?: string;
+  createdAt?: number;
+  suggestions?: string[];
+  steps?: ExecutionStep[];
+  currentStage?: string;
+};
 type Tab = 'models' | 'general' | 'connectors' | 'voice' | 'developer' | 'tools';
 type View = 'chat' | 'artifacts' | 'telemetry';
 const uid = () => `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -369,12 +381,36 @@ function App() {
       const content = String(event.content ?? '');
       const suggestions = Array.isArray(event.suggestions) ? event.suggestions.map(String).filter(Boolean) : [];
       const artifacts = (Array.isArray(event.artifacts) ? event.artifacts.map((item) => normalizeArtifact(item)) : []).concat(detectArtifacts(content));
+      const incomingSteps = Array.isArray(event.steps) ? (event.steps as ExecutionStep[]) : undefined;
+
       setMessages((current) => {
         const hasAssistant = current.some((item) => item.id === taskId && item.role === 'assistant');
         if (hasAssistant) {
-          return current.map((item) => item.id === taskId && item.role === 'assistant' ? { ...item, content, artifacts, suggestions, pending: false } : item);
+          return current.map((item) => {
+            if (item.id === taskId && item.role === 'assistant') {
+              return {
+                ...item,
+                content,
+                artifacts,
+                suggestions,
+                pending: false,
+                steps: incomingSteps || item.steps,
+                currentStage: undefined,
+              };
+            }
+            return item;
+          });
         }
-        return [...current, { id: taskId, role: 'assistant', content, artifacts, suggestions, pending: false, createdAt: Date.now() }];
+        return [...current, {
+          id: taskId,
+          role: 'assistant',
+          content,
+          artifacts,
+          suggestions,
+          pending: false,
+          steps: incomingSteps,
+          createdAt: Date.now(),
+        }];
       });
       const currentSettings = lastSettingsRef.current;
       if (currentSettings.read_aloud && 'speechSynthesis' in window) {
@@ -383,13 +419,113 @@ function App() {
         utterance.rate = currentSettings.voice_speed;
         window.speechSynthesis.speak(utterance);
       }
+    } else if (event.type === 'tool_call') {
+      const callId = String(event.id || `tool_${Date.now()}`);
+      const toolName = String(event.name || '');
+      const args = (event.arguments as Record<string, unknown>) || {};
+      setMessages((current) => current.map((item) => {
+        if (item.id === taskId && item.role === 'assistant') {
+          const prevSteps = item.steps || [];
+          const nextStep: ExecutionStep = {
+            id: callId,
+            type: 'tool',
+            name: toolName,
+            arguments: args,
+            status: 'running',
+            timestamp: Date.now(),
+          };
+          return {
+            ...item,
+            steps: [...prevSteps, nextStep],
+            currentStage: `Executing ${toolName}…`,
+          };
+        }
+        return item;
+      }));
+    } else if (event.type === 'tool_result') {
+      const callId = String(event.id || '');
+      const toolName = String(event.name || '');
+      const result = event.result;
+      const isFailed = (typeof result === 'string' && (result.startsWith('[TOOL_FAILED') || result.startsWith('[TOOL_DISABLED'))) ||
+                       (typeof result === 'object' && result !== null && ((result as Record<string, unknown>).success === false || (result as Record<string, unknown>).error));
+      const errText = isFailed ? (typeof result === 'string' ? result : String((result as Record<string, unknown>).error || 'Tool execution failed')) : undefined;
+      const durationMs = typeof event.duration_ms === 'number' ? event.duration_ms : undefined;
+
+      setMessages((current) => current.map((item) => {
+        if (item.id === taskId && item.role === 'assistant') {
+          const prevSteps = item.steps || [];
+          const updatedSteps: ExecutionStep[] = prevSteps.map((step: ExecutionStep) => {
+            if (step.id === callId || (step.type === 'tool' && step.name === toolName && step.status === 'running')) {
+              const status: 'failed' | 'completed' = isFailed ? 'failed' : 'completed';
+              return {
+                ...step,
+                status,
+                result,
+                error: errText,
+                durationMs: durationMs || (step.timestamp ? Date.now() - step.timestamp : undefined),
+              };
+            }
+            return step;
+          });
+          return { ...item, steps: updatedSteps };
+        }
+        return item;
+      }));
+    } else if (event.type === 'thought') {
+      const thoughtContent = String(event.content || '').trim();
+      if (thoughtContent) {
+        setMessages((current) => current.map((item) => {
+          if (item.id === taskId && item.role === 'assistant') {
+            const prevSteps = item.steps || [];
+            const thoughtStep: ExecutionStep = {
+              id: `thought_${event.turn || Date.now()}`,
+              type: 'thought',
+              stage: thoughtContent,
+              status: 'completed',
+              timestamp: Date.now(),
+            };
+            return { ...item, steps: [...prevSteps, thoughtStep] };
+          }
+          return item;
+        }));
+      }
+    } else if (event.type === 'status') {
+      const stage = String(event.stage || '').trim();
+      if (stage && stage !== 'completed') {
+        setMessages((current) => current.map((item) => {
+          if (item.id === taskId && item.role === 'assistant') {
+            return { ...item, currentStage: stage };
+          }
+          return item;
+        }));
+      }
     } else if (event.type === 'artifact_ready' && event.artifact) {
       const artifact = normalizeArtifact(event.artifact);
       setMessages((current) => current.map((item) => item.id === taskId && item.role === 'assistant' ? { ...item, artifacts: [...(item.artifacts ?? []), artifact] } : item));
     } else if (event.type === 'artifact_error' || event.type === 'error') {
-      setMessages((current) => current.map((item) => item.id === taskId && item.role === 'assistant' ? { ...item, pending: false, error: String(event.message ?? 'Makima could not complete this task.') } : item));
+      const errorMsg = String(event.message ?? 'Makima could not complete this task.');
+      setMessages((current) => current.map((item) => {
+        if (item.id === taskId && item.role === 'assistant') {
+          const updatedSteps: ExecutionStep[] = (item.steps || []).map((step: ExecutionStep) =>
+            step.status === 'running' ? { ...step, status: 'failed', error: errorMsg } : step
+          );
+          const incomingSteps = Array.isArray(event.steps) ? (event.steps as ExecutionStep[]) : updatedSteps;
+          return { ...item, pending: false, error: errorMsg, steps: incomingSteps, currentStage: undefined };
+        }
+        return item;
+      }));
     } else if (event.type === 'task_cancelled') {
-      setMessages((current) => current.map((item) => item.id === taskId && item.role === 'assistant' ? { ...item, pending: false, error: 'Task cancelled.' } : item));
+      const cancelMsg = 'Task cancelled.';
+      setMessages((current) => current.map((item) => {
+        if (item.id === taskId && item.role === 'assistant') {
+          const updatedSteps: ExecutionStep[] = (item.steps || []).map((step: ExecutionStep) =>
+            step.status === 'running' ? { ...step, status: 'failed', error: cancelMsg } : step
+          );
+          const incomingSteps = Array.isArray(event.steps) ? (event.steps as ExecutionStep[]) : updatedSteps;
+          return { ...item, pending: false, error: cancelMsg, steps: incomingSteps, currentStage: undefined };
+        }
+        return item;
+      }));
     }
   }, []);
 
@@ -399,11 +535,15 @@ function App() {
 
   const handleStop = useCallback((targetTaskId?: string) => {
     socket.stop();
-    setMessages((current) => current.map((item) =>
-      item.role === 'assistant' && item.pending && (!targetTaskId || item.id === targetTaskId)
-        ? { ...item, pending: false, error: 'Task cancelled.' }
-        : item
-    ));
+    setMessages((current) => current.map((item) => {
+      if (item.role === 'assistant' && item.pending && (!targetTaskId || item.id === targetTaskId)) {
+        const updatedSteps: ExecutionStep[] = (item.steps || []).map((step: ExecutionStep) =>
+          step.status === 'running' ? { ...step, status: 'failed', error: 'Stopped by user' } : step
+        );
+        return { ...item, pending: false, error: 'Task cancelled.', steps: updatedSteps, currentStage: undefined };
+      }
+      return item;
+    }));
     notify('Response generation stopped', 'info');
   }, [notify, socket]);
 
@@ -464,6 +604,7 @@ function App() {
                   content: message.content,
                   artifacts: artifacts.length ? artifacts : undefined,
                   suggestions: Array.isArray(message.metadata?.suggestions) ? (message.metadata.suggestions as string[]) : undefined,
+                  steps: Array.isArray(message.metadata?.steps) ? (message.metadata.steps as ExecutionStep[]) : undefined,
                   createdAt: message.created_at,
                 };
               }));
@@ -734,6 +875,7 @@ function App() {
           content: message.content,
           artifacts: artifacts.length ? artifacts : undefined,
           suggestions: Array.isArray(message.metadata?.suggestions) ? (message.metadata.suggestions as string[]) : undefined,
+          steps: Array.isArray(message.metadata?.steps) ? (message.metadata.steps as ExecutionStep[]) : undefined,
           createdAt: message.created_at,
         };
       }));
