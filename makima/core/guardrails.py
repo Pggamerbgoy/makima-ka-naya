@@ -52,15 +52,15 @@ class Guardrails:
             r"\brm\s+(?:-[a-zA-Z]*[rf][a-zA-Z]*\s+|--(?:recursive|force|no-preserve-root)\s+)+([\/~*]|\.\.)",
             "Recursive root or wild card file deletion (rm -rf)",
         ),
-        (r"\brmdir\s+\/s\s+(\/q\s+)?([a-zA-Z]:\\?|\*|\/)", "Recursive Windows directory destruction (rmdir /s)"),
-        (r"\bdel\s+(\/[fF]\s+)?\/[sS]\s+(\/[qQ]\s+)?([a-zA-Z]:\\?|\*|%systemroot%)", "Recursive Windows file deletion (del /s)"),
+        (r"\b(?:rmdir|rd)\s+(?:[/-][sSqQ]\s*)+([a-zA-Z]:\\?|\*|\/)", "Recursive Windows directory destruction (rmdir /s)"),
+        (r"\bdel\s+(?:[/-][fFsSqQ]\s*)+([a-zA-Z]:\\?|\*|%systemroot%)", "Recursive Windows file deletion (del /s)"),
         # Remote script download & pipe to shell / iex
         (r"(?:curl|wget|iwr|Invoke-WebRequest)\b.*\|\s*(?:bash|sh|zsh|iex|Invoke-Expression)\b", "Piping untrusted remote content directly to shell/iex"),
         # Base64 decoded shell execution
         (r"\bbase64\s+(?:-d|--decode)\b.*\|\s*(?:bash|sh|zsh)\b", "Piping decoded base64 payload directly to shell"),
-        # SQL drop/truncate
-        (r"\bDROP\s+(TABLE|DATABASE|SCHEMA|VIEW)\b", "Destructive SQL DROP operation"),
-        (r"\bTRUNCATE\s+TABLE\b", "Destructive SQL TRUNCATE operation"),
+        # SQL drop/truncate (including comment obfuscation like /**/)
+        (r"\bDROP(?:\s+|/\*.*?\*/)+(TABLE|DATABASE|SCHEMA|VIEW)\b", "Destructive SQL DROP operation"),
+        (r"\bTRUNCATE(?:\s+|/\*.*?\*/)+(?:TABLE\s+)?[a-zA-Z0-9_`\"\.]+", "Destructive SQL TRUNCATE operation"),
         # System crash / fork bombs
         (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", "Bash fork bomb"),
         (r"%\s*0\s*\|\s*%\s*0", "Batch fork bomb"),

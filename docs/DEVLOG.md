@@ -4,6 +4,33 @@
 
 ## 📅 2026-10-23
 
+### Entry 20: Comprehensive Adversarial Suite Implementation, Guardrail Bypass Remediation & SAGA Cryptographic Integrity
+- **Context**: In response to the user mandate "write new test dont trust old ones", designed and executed a completely fresh, adversarial, and uncompromising test suite (`tests/test_deep_adversarial_v2.py`) targeting deep runtime edge cases, concurrency stress, security circumvention, and Windows lifecycle anomalies.
+- **Decisions & Tradeoffs**:
+  1. **Built 10 Deep Adversarial Test Suites (`tests/test_deep_adversarial_v2.py`)**:
+     - *Suite 1 (Parallel Tool Failure Resilience)*: Validates multi-tool concurrent execution where an unhandled tool explosion (`RuntimeError`) is gracefully wrapped in `[TOOL_FAILED: name]` without deadlocking the engine or aborting sibling tasks.
+     - *Suite 2 (Dynamic Context Immutability)*: Verifies that transient browser context injections into system prompts never mutate or pollute canonical working message history or persistent episodic storage.
+     - *Suite 3 (Context Compressor Adversarial Slicing)*: Clamps massive 60,000-character tool outputs and ensures atomic pairing invariants between assistant `tool_calls` and tool responses across harsh token budgets.
+     - *Suite 4 (Obfuscated Shell Injection & Guardrails)*: Subjected guardrail regexes to adversarial obfuscation including chained commands, Windows aliases, and SQL comment padding.
+     - *Suite 5 (Presidio PII Fast Gate Integrity)*: Stress-tested regex pre-screening filters (`has_at`, `has_digits`) against valid Luhn credit cards, real-world emails, and AWS keys to guarantee zero false negatives.
+     - *Suite 6 (Terminal Windows Subprocess Quoting & Exit Codes)*: Tested Windows path spaces, multi-nested quotes, and exact exit code propagation.
+     - *Suite 7 (Filesystem Traversal Guards & Protected Credentials)*: Verified strict boundary traversal rejection (`../../`) and credential deny-listing.
+     - *Suite 8 (SAGA Rollback SHA256 Tamper Rejection)*: Verified that byte-level tampering of `.snap` payload files on disk is detected via SHA256 mismatch, aborting rollback and protecting destination files.
+     - *Suite 9 (SQLite WAL Concurrency & FTS5 Special Character Stress)*: Dispatched 20 concurrent async workers writing turns while executing search queries laden with syntax-breaking FTS5 characters (`*`, quotes, boolean keywords).
+     - *Suite 10 (Loop-Aware HTTP Client Migration Safety)*: Verified that `get_shared_client()` dynamically adapts across threads and separate asyncio event loops without socket leaks.
+  2. **Security Gaps Discovered & Remediated**:
+     - *Windows Directory Deletion Gap (`makima/core/guardrails.py`)*: Discovered that `Guardrails` blocked `rmdir /s` but omitted the native Windows alias `rd /s /q`. Updated pattern to `(r"\b(?:rmdir|rd)\s+(?:[/-][sSqQ]\s*)+([a-zA-Z]:\\?|\*|\/)", ...)`.
+     - *SQL Comment Obfuscation Gap (`makima/core/guardrails.py`)*: Destructive queries using SQL inline comments (`DROP/**/TABLE`) bypassed simple whitespace checks. Updated to `\bDROP(?:\s+|/\*.*?\*/)+(TABLE|DATABASE|SCHEMA|VIEW)\b` and `\bTRUNCATE(?:\s+|/\*.*?\*/)+...`.
+     - *Protected Files Deny-List (`makima/tools/filesystem/safe_io.py`)*: Added `wallet.dat` cryptocurrency database pattern to `PROTECTED_CREDENTIAL_PATTERNS`.
+- **Verification & Outcome**:
+  - `python tests/test_deep_adversarial_v2.py`: ALL 10 ADVERSARIAL SUITES PASSED (EXIT CODE 0).
+  - `python -m pytest tests/test_deep_adversarial_v2.py -v`: 10 passed in 0.49s.
+  - `python -m ruff check makima/ tests/ --select F401,F821`: Zero errors (clean).
+  - `tests/test_tier5_adversarial_hardening.py`: 21/21 PASSED.
+  - `tests/test_smoke.py`: 19/19 PASSED.
+  - `tests/verify_filesystem.py`: ALL 9 STAGES PASSED.
+  - `tests/verify_engine.py`: ALL 8 STAGES PASSED.
+
 ### Entry 19: Full-Codebase Multi-Subagent Dead Code Eradication, Windows Terminal Quoting Hardening & Zero-Regression Clean-Up
 - **Context**: Autonomous multi-subagent line-by-line inspection across all modules in `makima/core/`, `makima/tools/`, and test suites to eliminate dead code, redundant branches, unreferenced variables, and memory leaks.
 - **Decisions & Tradeoffs**:

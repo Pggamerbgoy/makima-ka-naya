@@ -45,7 +45,7 @@ PROTECTED_CREDENTIAL_PATTERNS: List[Pattern[str]] = [
     re.compile(r".*\.(pem|key|pfx|p12)$", re.IGNORECASE),
     re.compile(r".*(credential|secret|service[-_]account).*\.json$", re.IGNORECASE),
     re.compile(r"^(login data|cookies\.sqlite|web data)$", re.IGNORECASE),
-    re.compile(r"^(sam|system|security|ntuser\.dat)$", re.IGNORECASE),
+    re.compile(r"^(sam|system|security|ntuser\.dat|wallet\.dat)$", re.IGNORECASE),
 ]
 
 
