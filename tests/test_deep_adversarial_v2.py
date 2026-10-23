@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -211,10 +212,16 @@ async def test_engine_parallel_tool_failure_resilience():
         )
     )
 
-    result = await engine.run(
-        prompt="Calculate and test resilience",
-        tool_executor=mock_tool_executor,
-    )
+    engine_logger = logging.getLogger("makima.core.engine")
+    prev_level = engine_logger.level
+    engine_logger.setLevel(logging.CRITICAL + 1)
+    try:
+        result = await engine.run(
+            prompt="Calculate and test resilience",
+            tool_executor=mock_tool_executor,
+        )
+    finally:
+        engine_logger.setLevel(prev_level)
 
     assert result.turn_count == 2
     assert "healthy_tool gave 50" in result.content
@@ -367,9 +374,15 @@ def test_guardrails_obfuscated_injection_blocking():
         "diskpart /s script.txt",
     ]
 
-    for cmd in adversarial_destructive_commands:
-        with pytest.raises(DangerousCommandError, match=r"Command blocked by Makima safety guardrails"):
-            guard.validate_command(cmd)
+    guard_logger = logging.getLogger("makima.core.guardrails")
+    prev_level = guard_logger.level
+    guard_logger.setLevel(logging.CRITICAL + 1)
+    try:
+        for cmd in adversarial_destructive_commands:
+            with pytest.raises(DangerousCommandError, match=r"Command blocked by Makima safety guardrails"):
+                guard.validate_command(cmd)
+    finally:
+        guard_logger.setLevel(prev_level)
 
     # Legitimate non-destructive commands MUST NOT be blocked
     safe_commands = [
