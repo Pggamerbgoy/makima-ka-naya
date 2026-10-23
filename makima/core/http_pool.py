@@ -66,11 +66,17 @@ async def get_shared_client() -> httpx.AsyncClient:
 
         # If previous client was bound to an old loop or closed, clean up reference
         if _shared_client is not None:
-            if not _shared_client.is_closed and _client_loop is current_loop:
-                try:
-                    await _shared_client.aclose()
-                except Exception as exc:
-                    logger.debug(f"Error closing previous client during re-init: {exc}")
+            if not _shared_client.is_closed:
+                if _client_loop is current_loop:
+                    try:
+                        await _shared_client.aclose()
+                    except Exception as exc:
+                        logger.debug(f"Error closing previous client during re-init: {exc}")
+                elif _client_loop is not None and _client_loop.is_running():
+                    try:
+                        asyncio.run_coroutine_threadsafe(_shared_client.aclose(), _client_loop)
+                    except Exception:
+                        pass
             _shared_client = None
 
         try:

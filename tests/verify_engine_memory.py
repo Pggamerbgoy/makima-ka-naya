@@ -163,11 +163,11 @@ async def test_memory_injection():
         assert "<memory>" in effective, "Missing <memory> section in effective system prompt."
         assert "</memory>" in effective, "Missing </memory> close tag."
         assert "pytest over unittest" in effective, "StateMemory fact missing from injection."
-        assert "router cascades" in effective, "Episodic recent message missing from injection."
+        assert any("router cascades" in (m.content or "") for m in provider.call_history[0]), "Episodic recent message missing from working messages."
         assert "pytest is the preferred runner" in effective, "Vector hit missing from injection."
         assert "distance=" in effective, "Vector distance missing from injection."
 
-    print("  -> PASSED: <memory> section contains state + episodic + vector context!")
+    print("  -> PASSED: <memory> section contains state + vector context, with episodic dialogue hydrated into working messages!")
 
 
 async def test_memory_persistence():

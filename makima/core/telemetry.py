@@ -18,9 +18,10 @@ import asyncio
 import json
 import logging
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Deque, Dict, List, Optional, Union
 
 logger = logging.getLogger("makima.core.telemetry")
 
@@ -88,7 +89,7 @@ class StructuredTelemetry:
         self.buffer_size = buffer_size
         self.enabled = enabled
 
-        self._buffer: List[Dict[str, Any]] = []
+        self._buffer: Deque[Dict[str, Any]] = deque(maxlen=self.buffer_size)
         self._lock = asyncio.Lock()
         self._current_date: str = ""
         self._log_file: Optional[Path] = None
@@ -115,10 +116,7 @@ class StructuredTelemetry:
         jsonl_line = event.to_jsonl()
 
         async with self._lock:
-            # Add to ring buffer
             self._buffer.append(event_dict)
-            if len(self._buffer) > self.buffer_size:
-                self._buffer = self._buffer[-self.buffer_size :]
 
         # Write to JSONL file in thread (non-blocking)
         log_file = self._get_log_file()
@@ -129,19 +127,29 @@ class StructuredTelemetry:
 
     def emit_sync(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
         """
-        Synchronous emit for use in non-async contexts.
-        File write is skipped (buffer-only) to avoid blocking.
+        Synchronous emit for use in non-async contexts or fast event recording.
+        Dispatches background thread-safe file persistence if event loop is running,
+        or synchronous file write as fallback.
         """
         if not self.enabled:
             return
         event = TelemetryEvent(event_type, data)
         self._buffer.append(event.to_dict())
-        if len(self._buffer) > self.buffer_size:
-            self._buffer = self._buffer[-self.buffer_size :]
+        jsonl_line = event.to_jsonl()
+        log_file = self._get_log_file()
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(asyncio.to_thread(_append_jsonl, log_file, jsonl_line))
+        except RuntimeError:
+            try:
+                _append_jsonl(log_file, jsonl_line)
+            except Exception:
+                pass
 
     def get_recent(self, n: int = 50) -> List[Dict[str, Any]]:
         """Returns the last N events from the in-memory buffer (newest last)."""
-        return list(self._buffer[-n:])
+        return list(self._buffer)[-n:]
 
     def get_event_count(self) -> int:
         """Returns the number of events currently in the buffer."""

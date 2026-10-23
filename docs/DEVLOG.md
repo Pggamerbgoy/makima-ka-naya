@@ -17,13 +17,31 @@
      - *LRU Caching & Dynamic Vectors*: Added 1,000-entry LRU embedding cache in `VectorSearchEngine` and dynamic dimension resolution from `configs/settings.yaml`.
   3. **Gateway Supervisor Resilience (`makima/gateway/daemon.py` & adapters)**:
      - Isolated platform adapters (`telegram`, `discord`, `whatsapp`, `email`) in supervised initialization handlers with exponential backoff on network disconnections.
-  4. **Adversarial Context Scaling (`makima/core/context.py`)**:
+  4. **Adversarial Context Scaling & Token Estimation (`makima/core/context.py`)**:
      - Implemented dynamic budget scaling for `_clamp_large_message` ensuring small-budget contexts (e.g. 8k LLaMA) clamp oversized payloads (<2200 chars) while large-budget contexts (Gemini 1M, Qwen 128k) preserve full operational trace.
+     - Upgraded BPE tokenizer to OpenAI `o200k_base` with fallback to `cl100k_base` for optimal Hindi/Hinglish token efficiency.
+     - Added progressive tail shrinking on production contexts (>=1000 tokens) if messages still exceed the hard context ceiling.
+  5. **Core Engine KV-Cache & Type Safety (`makima/core/engine.py` & `prompts.py`)**:
+     - Imported `Tuple` in `engine.py` to prevent runtime inspection `NameError`.
+     - Removed redundant episodic recent turns from system prompt injection `<memory>`, preserving prefix KV-cache and delegating dialogue history exclusively to `working_messages`.
+     - Synchronized `<agent_loop>` prompt instructions to explicitly permit speculative parallel tool calls for independent read-only queries.
+  6. **Telemetry Deque & Sync Disk Persistence (`makima/core/telemetry.py`)**:
+     - Replaced list slicing with `collections.deque(maxlen=buffer_size)` for O(1) appending and zero reallocation overhead.
+     - Enhanced `emit_sync` with loop-aware threadsafe JSONL persistence.
+  7. **Guardrails Injection & Bypass Protection (`makima/core/guardrails.py`)**:
+     - Hardened recursive file deletion regex to detect reversed flags (`-fr`), multi-part flags (`-r -f`), `--recursive`, and `--no-preserve-root`.
+     - Added blocking patterns for untrusted piping to shell (`curl ... | sh`, `Invoke-WebRequest ... | iex`) and base64 decode pipelines.
+     - Converted entropy-based secret redaction to word-boundary regex substitution to prevent unintended substring corruption.
+  8. **Cross-Loop HTTP Socket Leak Prevention (`makima/core/http_pool.py`)**:
+     - Handled cross-thread loop changes in `get_shared_client()` using `asyncio.run_coroutine_threadsafe(aclose())` to guarantee old sockets are freed.
 - **Verification & Outcome**:
   - `tests/verify_sentinel.py`: All 8 stages passed with exit code 0.
   - `tests/verify_memory.py` & `tests/verify_vector_search.py`: Passed 100% (7/7).
   - `tests/verify_engine.py` & `tests/verify_engine_memory.py`: Passed 100% (8/8).
-  - `tests/test_tier5_adversarial_hardening.py`: 21/21 passed in 11.72s.
+  - `tests/test_parallel_tool_execution.py`: Passed 100%.
+  - `tests/verify_telemetry.py`: Passed 9/9 (100%).
+  - `tests/test_tier5_adversarial_hardening.py`: 21/21 passed in 11.90s.
+  - `tests/verify_compressor_quality.py`: Passed 100% (5/5).
   - `tests/verify_gateway_core.py` & `tests/verify_whatsapp_email.py`: Passed 100%.
 
 ---

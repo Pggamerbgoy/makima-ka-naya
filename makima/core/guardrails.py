@@ -48,9 +48,16 @@ class Guardrails:
         (r"\bmkfs(\.[a-z0-9]+)?\b", "Linux filesystem formatting"),
         (r"\bdd\s+if=.*of=(\/dev\/[a-z]+|[a-zA-Z]:)", "Raw block device write (dd)"),
         # Recursive destructive deletion
-        (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f\s+([\/~*]|\.\.)", "Recursive root or wild card file deletion (rm -rf)"),
+        (
+            r"\brm\s+(?:-[a-zA-Z]*[rf][a-zA-Z]*\s+|--(?:recursive|force|no-preserve-root)\s+)+([\/~*]|\.\.)",
+            "Recursive root or wild card file deletion (rm -rf)",
+        ),
         (r"\brmdir\s+\/s\s+(\/q\s+)?([a-zA-Z]:\\?|\*|\/)", "Recursive Windows directory destruction (rmdir /s)"),
         (r"\bdel\s+(\/[fF]\s+)?\/[sS]\s+(\/[qQ]\s+)?([a-zA-Z]:\\?|\*|%systemroot%)", "Recursive Windows file deletion (del /s)"),
+        # Remote script download & pipe to shell / iex
+        (r"(?:curl|wget|iwr|Invoke-WebRequest)\b.*\|\s*(?:bash|sh|zsh|iex|Invoke-Expression)\b", "Piping untrusted remote content directly to shell/iex"),
+        # Base64 decoded shell execution
+        (r"\bbase64\s+(?:-d|--decode)\b.*\|\s*(?:bash|sh|zsh)\b", "Piping decoded base64 payload directly to shell"),
         # SQL drop/truncate
         (r"\bDROP\s+(TABLE|DATABASE|SCHEMA|VIEW)\b", "Destructive SQL DROP operation"),
         (r"\bTRUNCATE\s+TABLE\b", "Destructive SQL TRUNCATE operation"),
@@ -245,21 +252,20 @@ class Guardrails:
             result = pattern.sub("[REDACTED_SECRET]", result)
 
         # 3. Entropy-based token redaction
-        # Scan words with length >= min_secret_length that are alphanumeric / key-like
-        words = re.findall(r"\b[A-Za-z0-9_\-\.]{16,}\b", result)
-        for word in words:
-            # Skip placeholders, repetitive strings, and benign URL slugs / domains
+        def _replace_high_entropy(match: re.Match) -> str:
+            word = match.group(0)
             if (
                 word == "[REDACTED_SECRET]"
                 or len(set(word)) <= 3
                 or len(word) < self.min_secret_length
                 or self._is_benign_slug_or_domain(word, self.min_secret_length)
             ):
-                continue
-            entropy = self.calculate_entropy(word)
-            if entropy >= self.entropy_threshold:
-                result = result.replace(word, "[REDACTED_SECRET]")
+                return word
+            if self.calculate_entropy(word) >= self.entropy_threshold:
+                return "[REDACTED_SECRET]"
+            return word
 
+        result = re.sub(r"\b[A-Za-z0-9_\-\.]{16,}\b", _replace_high_entropy, result)
         return result
 
     @staticmethod

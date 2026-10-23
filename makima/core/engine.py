@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel, Field
 
@@ -437,21 +437,6 @@ class HermesAgentEngine:
                         parts.append("## Relevant Memory\n" + "\n".join(recall_lines))
             except Exception as e:
                 logger.debug(f"VectorSearch recall skipped: {e}")
-
-        # 3. EpisodicMemory — inject recent dialogue context for the active session
-        if self.episodic_memory is not None and session_id:
-            try:
-                recent_turns = await self.episodic_memory.get_recent_turns(session_id=session_id, limit=5)
-                if recent_turns:
-                    dialogue_lines = [
-                        f"- [{t.get('role', 'user').capitalize()}]: {str(t.get('content') or '')[:250]}"
-                        for t in recent_turns
-                        if t.get("content")
-                    ]
-                    if dialogue_lines:
-                        parts.append("## Recent Dialogue\n" + "\n".join(dialogue_lines))
-            except Exception as e:
-                logger.debug(f"EpisodicMemory injection skipped: {e}")
 
         if not parts:
             return ""
