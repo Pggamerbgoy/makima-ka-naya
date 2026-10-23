@@ -14,8 +14,6 @@ verifying:
 """
 
 import asyncio
-import json
-import os
 import sys
 import tempfile
 import time
@@ -36,7 +34,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from fastapi.testclient import TestClient
 from makima.api.app import create_app
 from makima.core.engine import HermesAgentEngine
-from makima.core.context import ContextCompressor, count_tokens
+from makima.core.context import ContextCompressor
 from makima.memory import EpisodicMemory, StateMemory
 from makima.provider.adapters.base import BaseProvider, Message, ProviderResponse, ToolCall
 from makima.provider.router import ParetoCandidate, ParetoRouter

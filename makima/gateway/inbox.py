@@ -17,7 +17,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 logger = logging.getLogger("makima.gateway.inbox")
 

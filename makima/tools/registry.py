@@ -47,10 +47,6 @@ DEFAULT_MUTATING_TAGS: Set[str] = {
     "kill", "window", "mouse", "keyboard", "uia", "mutating",
 }
 
-# Dynamic boundary accessors & backward compatibility
-PARALLEL_SAFE_TAGS: Set[str] = DEFAULT_PARALLEL_SAFE_TAGS
-MUTATING_TAGS: Set[str] = DEFAULT_MUTATING_TAGS
-
 
 def get_concurrency_tag_boundaries() -> Tuple[Set[str], Set[str]]:
     """
@@ -393,7 +389,7 @@ class Tool:
         tool_tags = list(tags) if tags else []
 
         parameters_schema, args_model, pos_only, has_kw = synthesize_parameters_schema(fn)
-        is_coroutine = inspect.iscoroutinefunction(fn) or asyncio.iscoroutinefunction(fn)
+        is_coroutine = inspect.iscoroutinefunction(fn)
         safe = infer_parallel_safe(
             tool_tags,
             explicit=parallel_safe,

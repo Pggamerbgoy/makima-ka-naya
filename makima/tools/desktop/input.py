@@ -11,7 +11,7 @@ import ctypes
 import logging
 import time
 from ctypes import wintypes
-from typing import Any
+from typing import Any, Optional
 
 import win32con
 

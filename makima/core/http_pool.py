@@ -69,17 +69,11 @@ async def get_shared_client() -> httpx.AsyncClient:
 
         # If previous client was bound to an old loop or closed, clean up reference
         if _shared_client is not None:
-            if not _shared_client.is_closed:
-                if _client_loop is current_loop:
-                    try:
-                        await _shared_client.aclose()
-                    except Exception as exc:
-                        logger.debug(f"Error closing previous client during re-init: {exc}")
-                elif _client_loop is not None and _client_loop.is_running():
-                    try:
-                        asyncio.run_coroutine_threadsafe(_shared_client.aclose(), _client_loop)
-                    except Exception:
-                        pass
+            if not _shared_client.is_closed and _client_loop is not None and _client_loop.is_running():
+                try:
+                    asyncio.run_coroutine_threadsafe(_shared_client.aclose(), _client_loop)
+                except Exception:
+                    pass
             _shared_client = None
 
         try:
@@ -175,27 +169,4 @@ def close_shared_sync_client() -> None:
                 _shared_sync_client = None
 
 
-class HTTPPool:
-    """
-    Class-based interface providing thread-safe and loop-safe access to the shared HTTP pool.
-    """
 
-    @classmethod
-    async def get_client(cls) -> httpx.AsyncClient:
-        """Returns the loop-aware persistent httpx.AsyncClient singleton."""
-        return await get_shared_client()
-
-    @classmethod
-    async def close(cls) -> None:
-        """Closes the active connection pool gracefully."""
-        await close_shared_client()
-
-    @classmethod
-    def get_sync_client(cls) -> httpx.Client:
-        """Returns the persistent synchronous httpx.Client singleton."""
-        return get_shared_sync_client()
-
-    @classmethod
-    def close_sync(cls) -> None:
-        """Closes the synchronous HTTP client pool."""
-        close_shared_sync_client()

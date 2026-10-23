@@ -22,10 +22,8 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 # Force UTF-8 on Windows stdout
@@ -38,7 +36,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from makima.tools.browser.automation import (
-    BrowserController,
     browser_interact,
     get_browser_controller,
 )

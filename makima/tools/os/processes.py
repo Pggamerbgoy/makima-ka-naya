@@ -44,7 +44,7 @@ def list_processes(
 
     # Fast iteration over running processes
     for proc in psutil.process_iter(
-        ["pid", "name", "cpu_percent", "memory_percent", "status", "create_time", "username"]
+        ["pid", "name", "cpu_percent", "memory_percent", "memory_info", "status", "create_time", "username"]
     ):
         try:
             info = proc.info
@@ -56,14 +56,11 @@ def list_processes(
             username = info.get("username") or ""
             ctime = info.get("create_time")
 
-            # Try to get memory RSS in MB if available
+            # Fast memory RSS in MB extraction from pre-fetched proc info (avoids per-process syscalls)
             mem_mb: Optional[float] = None
-            try:
-                mem_info = proc.memory_info()
-                if mem_info:
-                    mem_mb = round(mem_info.rss / (1024 * 1024), 2)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+            mem_info = info.get("memory_info")
+            if mem_info and hasattr(mem_info, "rss"):
+                mem_mb = round(mem_info.rss / (1024 * 1024), 2)
 
             processes.append(
                 {
@@ -82,9 +79,7 @@ def list_processes(
 
     # Sorting
     key = sort_by.strip().lower()
-    if key in ("cpu", "cpu_percent"):
-        processes.sort(key=lambda p: p.get("cpu_percent", 0.0) or 0.0, reverse=True)
-    elif key in ("memory", "ram", "mem", "memory_percent"):
+    if key in ("memory", "ram", "mem", "memory_percent"):
         processes.sort(key=lambda p: p.get("memory_percent", 0.0) or 0.0, reverse=True)
     elif key == "pid":
         processes.sort(key=lambda p: p.get("pid", 0) or 0)

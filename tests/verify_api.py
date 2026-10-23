@@ -18,13 +18,10 @@ Tests:
      - Error handling on invalid/empty frames.
 """
 
-import asyncio
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock
 
 # Add project root to sys.path
 repo_root = Path(__file__).resolve().parent.parent
@@ -38,7 +35,6 @@ from makima.api.app import create_app
 from makima.core.engine import HermesAgentEngine
 from makima.provider.adapters.base import Message, ProviderResponse, ToolCall
 from makima.provider.router import ParetoRouter
-from makima.tools.registry import ToolRegistry, get_registry, reset_registry
 
 
 class MockEngineRouter(ParetoRouter):

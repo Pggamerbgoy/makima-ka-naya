@@ -11,11 +11,10 @@ Tests:
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 # Ensure makima is importable
 repo_root = Path(__file__).resolve().parent.parent
@@ -25,12 +24,10 @@ if str(repo_root) not in sys.path:
 from makima.core import (
     ContextCompressor,
     DangerousCommandError,
-    EngineResult,
     Guardrails,
     HermesAgentEngine,
     TokenCounter,
     count_tokens,
-    filter_secrets,
 )
 from makima.provider.adapters.base import BaseProvider, Message, ProviderResponse, ToolCall
 from makima.provider.router import ParetoCandidate, ParetoRouter

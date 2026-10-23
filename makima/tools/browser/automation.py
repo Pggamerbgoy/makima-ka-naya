@@ -338,34 +338,35 @@ class BrowserController:
             page = await self.ensure_page(headless=self._is_headless)
         except Exception as exc:
             logger.error("ensure_page failed in navigate: %s: %s", type(exc).__name__, exc, exc_info=True)
-            # Fallback to desktop window navigation if a browser is already running on the desktop
-            try:
-                from makima.tools.os.windows import _find_target_window, focus_window
-                from makima.tools.desktop.input import keyboard_hotkey, keyboard_type
-                hwnd, win_title, _ = _find_target_window("Brave")
-                if not hwnd:
-                    hwnd, win_title, _ = _find_target_window("Chrome")
-                if not hwnd:
-                    hwnd, win_title, _ = _find_target_window("Edge")
-                if hwnd:
-                    focus_window(hwnd=hwnd)
-                    await asyncio.sleep(0.1)
-                    keyboard_hotkey(keys=["ctrl", "l"])
-                    await asyncio.sleep(0.05)
-                    keyboard_type(text=target_url)
-                    await asyncio.sleep(0.05)
-                    keyboard_hotkey(keys=["enter"])
-                    await asyncio.sleep(0.5)
-                    return {
-                        "success": True,
-                        "method": "desktop_browser_fallback",
-                        "url": target_url,
-                        "title": win_title,
-                        "message": f"Navigated to {target_url} in active desktop browser ({win_title}).",
-                        "playwright_error": f"{type(exc).__name__}: {exc}",
-                    }
-            except Exception as desk_err:
-                logger.debug("Desktop navigation fallback failed: %s", desk_err)
+            # Fallback to desktop window navigation ONLY if headless is False and a desktop browser is active
+            if not self._is_headless:
+                try:
+                    from makima.tools.os.windows import _find_target_window, focus_window
+                    from makima.tools.desktop.input import keyboard_hotkey, keyboard_type
+                    hwnd, win_title, _ = _find_target_window("Brave")
+                    if not hwnd:
+                        hwnd, win_title, _ = _find_target_window("Chrome")
+                    if not hwnd:
+                        hwnd, win_title, _ = _find_target_window("Edge")
+                    if hwnd:
+                        focus_window(hwnd=hwnd)
+                        await asyncio.sleep(0.1)
+                        keyboard_hotkey(keys=["ctrl", "l"])
+                        await asyncio.sleep(0.05)
+                        keyboard_type(text=target_url)
+                        await asyncio.sleep(0.05)
+                        keyboard_hotkey(keys=["enter"])
+                        await asyncio.sleep(0.5)
+                        return {
+                            "success": True,
+                            "method": "desktop_browser_fallback",
+                            "url": target_url,
+                            "title": win_title,
+                            "message": f"Navigated to {target_url} in active desktop browser ({win_title}).",
+                            "playwright_error": f"{type(exc).__name__}: {exc}",
+                        }
+                except Exception as desk_err:
+                    logger.debug("Desktop navigation fallback failed: %s", desk_err)
 
             err_msg = str(exc)
             if "executable" in err_msg.lower() or "playwright install" in err_msg.lower() or "missing" in err_msg.lower():
@@ -1025,6 +1026,15 @@ async def browse_page(
         if isinstance(res, dict):
             res["final_url"] = res.get("url", "")
         return res
+    except Exception as exc:
+        err_msg = str(exc)
+        if "executable" in err_msg.lower() or "playwright install" in err_msg.lower() or "missing" in err_msg.lower():
+            return {
+                "success": False,
+                "error": "Chromium browser binaries are missing. Please run: playwright install chromium",
+                "help": "Run 'playwright install chromium' to install required browser binaries.",
+            }
+        return {"success": False, "error": f"Failed to browse page: {exc}"}
     finally:
         # Only close browser if browse_page started a temporary one-shot session
         if not was_active:

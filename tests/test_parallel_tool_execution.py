@@ -3,8 +3,7 @@ import os
 import sys
 import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from typing import Any, Dict, List
-from makima.core.engine import HermesAgentEngine, Message
+from makima.core.engine import HermesAgentEngine
 from makima.provider.adapters.base import ProviderResponse, ToolCall
 from makima.provider.router import ParetoRouter
 from makima.tools.registry import ToolRegistry

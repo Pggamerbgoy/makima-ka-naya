@@ -10,7 +10,7 @@ import collections
 import logging
 import math
 import re
-from typing import Any, Dict, List, Optional, Pattern, Set, Tuple
+from typing import Any, List, Optional, Pattern, Set, Tuple
 
 logger = logging.getLogger("makima.core.guardrails")
 

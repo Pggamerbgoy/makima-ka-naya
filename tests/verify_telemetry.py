@@ -30,7 +30,6 @@ def record(name: str, ok: bool, detail: str = "") -> None:
 # ---------------------------------------------------------------------------
 def test_import():
     try:
-        from makima.core.telemetry import StructuredTelemetry, TelemetryEvent, get_telemetry
         record("Import StructuredTelemetry, TelemetryEvent, get_telemetry", True)
         return True
     except Exception as e:

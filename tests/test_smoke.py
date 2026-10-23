@@ -4,17 +4,15 @@ Designed for standard `python -m pytest` test runner with assert-based tests.
 """
 
 import asyncio
-import os
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from makima.config import get_settings
-from makima.core.context import ContextCompressor, count_tokens
-from makima.core.guardrails import DangerousCommandError, Guardrails, filter_secrets
-from makima.core.telemetry import StructuredTelemetry, get_telemetry
+from makima.core.context import ContextCompressor
+from makima.core.guardrails import DangerousCommandError, Guardrails
+from makima.core.telemetry import StructuredTelemetry
 from makima.memory.episodic import EpisodicMemory
 from makima.memory.state import StateMemory
 from makima.provider.adapters.base import Message
@@ -25,12 +23,11 @@ from makima.tools.media import play_song
 from makima.tools.os import (
     launch_application,
     show_desktop_notification,
-    terminate_application,
 )
 from makima.tools.os.apps import launch_app
 from makima.tools.os.processes import terminate_process
 from makima.tools.os.windows import _find_target_window
-from makima.tools.registry import ToolRegistry, get_registry, tool
+from makima.tools.registry import ToolRegistry, tool
 from makima.tools.web_search import fetch_page, web_search
 import time
 import win32con
@@ -325,7 +322,6 @@ def test_preference_memory_tools_smoke(tmp_path: Path):
         remember_fact,
         get_user_profile,
         get_memory_facts,
-        forget_user_preference,
         forget_fact,
     )
     import makima.tools.memory as mem_mod

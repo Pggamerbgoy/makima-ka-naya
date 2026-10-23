@@ -11,9 +11,8 @@ Tests:
 import asyncio
 import os
 import sys
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 # Ensure makima is importable
 repo_root = Path(__file__).resolve().parent.parent
@@ -23,7 +22,6 @@ if str(repo_root) not in sys.path:
 from makima.config import BackendConfig
 from makima.provider import (
     CircuitBreaker,
-    CircuitBreakerOpenError,
     CircuitState,
     GeminiProvider,
     Message,

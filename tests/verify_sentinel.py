@@ -11,11 +11,8 @@ Validates:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
-import shutil
 import sys
-import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
@@ -33,7 +30,6 @@ from makima.gateway.daemon import GatewayDaemon
 from makima.memory.reflection import ImplicitPreferenceLearner
 from makima.memory.state import StateMemory
 from makima.sentinel import (
-    evaluate_and_act,
     is_dnd_process,
     load_habits,
     run_habit_analysis,
@@ -171,7 +167,6 @@ def run_tests():
     print("\n[Stage 7] Testing Event-Driven Daemon & StackTrace Analyzer...")
     from makima.sentinel.event_daemon import (
         StackTraceAnalyzer,
-        StackTraceInfo,
         SentinelEventDaemon,
         _DownloadsEventHandler,
     )
@@ -283,7 +278,7 @@ ZeroDivisionError: division by zero"""
     assert get_sentinel_daemon() is daemon, "get_sentinel_daemon() must return active instance"
 
     # 8.3 Async Live Dispatcher Mock & PII Masking Verification
-    dispatched_events: List[str] = []
+    dispatched_events: list[str] = []
     dispatch_event_received = threading.Event()
 
     async def mock_live_dispatcher(prompt: str) -> None:

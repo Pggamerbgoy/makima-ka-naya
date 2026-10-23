@@ -11,7 +11,6 @@ import asyncio
 import logging
 import os
 import sys
-import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,13 +30,9 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.config import get_settings
 from makima.provider import (
-    CircuitBreaker,
-    CircuitBreakerOpenError,
     CircuitState,
     Message,
-    ParetoCandidate,
     ParetoRouter,
     ProviderMetrics,
     ProviderResponse,

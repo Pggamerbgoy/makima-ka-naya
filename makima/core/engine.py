@@ -31,13 +31,11 @@ try:
     from makima.memory.state import StateMemory
     from makima.memory.vector_search import VectorSearchEngine
     from makima.memory.reflection import ImplicitPreferenceLearner
-    _MEMORY_AVAILABLE = True
 except ImportError:
     EpisodicMemory = None  # type: ignore
     StateMemory = None  # type: ignore
     VectorSearchEngine = None  # type: ignore
     ImplicitPreferenceLearner = None  # type: ignore
-    _MEMORY_AVAILABLE = False
 
 # Telemetry & Skills subsystems — optional, graceful fallback
 try:
@@ -454,13 +452,13 @@ class HermesAgentEngine:
             matching = await asyncio.to_thread(self.skills_loader.search_skills, prompt)
             if not matching:
                 # If full prompt sentence didn't match, check individual meaningful keywords
+                matching = []
                 words = [w.strip() for w in re.findall(r"\b\w+\b", prompt.lower()) if len(w.strip()) > 3]
                 stop_words = {"what", "when", "where", "which", "with", "from", "that", "this", "then", "have", "make", "does", "right", "know", "please"}
                 keywords = [w for w in words if w not in stop_words]
                 for kw in keywords:
                     kw_matches = await asyncio.to_thread(self.skills_loader.search_skills, kw)
                     if kw_matches:
-                        matching = list(matching) if matching else []
                         for m in kw_matches:
                             if m not in matching:
                                 matching.append(m)
@@ -505,7 +503,7 @@ class HermesAgentEngine:
                         msg_meta.update(execution_meta)
                     else:
                         msg_meta.setdefault("tool_calls_count", len(msg.tool_calls or []))
-                        msg_meta.setdefault("model_used", getattr(self, "_last_model_used", "mock-hermes-v2"))
+                        msg_meta.setdefault("model_used", getattr(self, "model", getattr(self.router, "default_model", "hermes-agent")))
                         msg_meta.setdefault("latency_ms", 0.0)
                 stored_turn_id = await self.episodic_memory.store_turn(
                     session_id=session_id,

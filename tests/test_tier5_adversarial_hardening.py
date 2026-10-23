@@ -12,36 +12,20 @@ Adversarial Stress Testing & Coverage Hardening for Makima v2:
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
-import os
-import re
-import tempfile
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any, Dict, List
 
 import httpx
 import pytest
 
 # Core subsystems under adversarial test
-from makima.core.context import ContextCompressor, TokenCounter, count_tokens
-from makima.core.engine import HermesAgentEngine
+from makima.core.context import ContextCompressor
 from makima.core.http_pool import close_shared_client, get_shared_client
 from makima.gateway.adapters.whatsapp import WhatsAppAdapter, normalize_whatsapp_jid
 from makima.gateway.security import GatewaySecurityManager
-from makima.core.guardrails import Guardrails
-from makima.memory.episodic import EpisodicMemory
-from makima.memory.state import StateMemory
 from makima.provider.adapters.base import Message, ToolCall
 from makima.tools.registry import (
-    Tool,
-    ToolError,
-    ToolExecutionError,
-    ToolNotFoundError,
     ToolRegistry,
-    ToolValidationError,
     get_registry,
 )
 
@@ -73,7 +57,6 @@ class TestTier5ConnectionPoolingAdversarial:
         """
         await close_shared_client()
 
-        clients = []
 
         async def worker(idx: int):
             # Stagger slightly with micro-sleeps to maximize race opportunities at the lock
@@ -673,7 +656,6 @@ class TestTier5SpecializedAgentsAndCanvasIntegrity:
         # 1. Canvas modes and kinds specification
         valid_modes = {"edit", "preview", "split"}
         assert len(valid_modes) == 3
-        valid_kinds = {"code", "markdown", "table", "chart", "diagram", "media", "json"}
         for k in ("code", "markdown", "diagram"):
             assert f"'{k}'" in ts_code or f'"{k}"' in ts_code
 

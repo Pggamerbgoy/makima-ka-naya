@@ -91,9 +91,7 @@ def _play_youtube(query: str, auto_open: bool, browser: str | None = None) -> di
     # Strategy 2: Direct HTTP fetch with regex fallback if YoutubeSearch encountered parsing issue
     if not video_id:
         try:
-            import asyncio
-            import concurrent.futures
-            import httpx
+            from makima.core.http_pool import get_shared_sync_client
 
             search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
             headers = {
@@ -104,23 +102,10 @@ def _play_youtube(query: str, auto_open: bool, browser: str | None = None) -> di
                 "Accept-Language": "en-US,en;q=0.9",
             }
 
-            async def _fetch_youtube_html() -> tuple[int, str]:
-                async with httpx.AsyncClient(timeout=5.0, headers=headers, follow_redirects=True) as client:
-                    resp = await client.get(search_url)
-                    return resp.status_code, resp.text
-
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is not None and loop.is_running():
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    status_code, resp_text = executor.submit(asyncio.run, _fetch_youtube_html()).result(timeout=6.0)
-            else:
-                status_code, resp_text = asyncio.run(_fetch_youtube_html())
-
-            if status_code == 200:
+            client = get_shared_sync_client()
+            resp = client.get(search_url, headers=headers, timeout=5.0, follow_redirects=True)
+            if resp.status_code == 200:
+                resp_text = resp.text
                 match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp_text)
                 if not match:
                     match = re.search(r'/watch\?v=([a-zA-Z0-9_-]{11})', resp_text)
@@ -153,7 +138,7 @@ def _play_youtube(query: str, auto_open: bool, browser: str | None = None) -> di
         "channel": channel,
         "duration": duration,
         "auto_open": auto_open,
-        "opened": opened if auto_open else False,
+        "opened": opened,
         "launch_method": launch_method,
     }
 
@@ -191,7 +176,7 @@ def _play_spotify(query: str, auto_open: bool, browser: str | None = None) -> di
         "uri": spotify_uri,
         "url": web_url,
         "auto_open": auto_open,
-        "opened": opened if auto_open else False,
+        "opened": opened,
         "launch_method": launch_method,
     }
 

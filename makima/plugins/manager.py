@@ -7,7 +7,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from makima.plugins.manifest import PluginKind, PluginManifest
 from makima.plugins.mcp_client import MCPManager

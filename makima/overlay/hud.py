@@ -1720,11 +1720,12 @@ class SpotlightHUD:
 
         except Exception as exc:
             logger.exception("Agent dispatch failed: %s", exc)
+            err_str = str(exc)
 
             def _on_err():
-                self.add_step("⚠️", f"Error: {exc}", "warning")
-                self.set_output(f"Operation failed:\n{exc}")
-                self.add_message(is_user=False, text=f"Operation failed:\n{exc}", agent="System")
+                self.add_step("⚠️", f"Error: {err_str}", "warning")
+                self.set_output(f"Operation failed:\n{err_str}")
+                self.add_message(is_user=False, text=f"Operation failed:\n{err_str}", agent="System")
                 self.thinking_frame.pack_forget()
                 self.status_strip.configure(text="Error occurred")
                 self.is_running = False

@@ -13,7 +13,6 @@ Tests:
 import sys
 import ctypes
 import pathlib
-import time
 
 # Ensure makima_v2 is in sys.path
 makima_root = pathlib.Path(__file__).resolve().parent.parent

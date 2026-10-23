@@ -19,13 +19,6 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from makima.tools import ToolRegistry, get_registry, reset_registry
-from makima.tools.media import (
-    control_media,
-    get_media_status,
-    get_volume,
-    set_volume,
-    toggle_mute,
-)
 
 
 async def test_exports_and_discovery():

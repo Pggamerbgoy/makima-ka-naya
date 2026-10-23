@@ -445,7 +445,7 @@ def list_directory(
             for f in files:
                 _process_item(root_path / f)
     else:
-        for item in sorted(resolved.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for item in resolved.iterdir():
             _process_item(item)
 
     # Sort directories first, then alphabetical

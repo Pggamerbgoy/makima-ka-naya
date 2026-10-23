@@ -35,7 +35,7 @@ async def _get_active_session(
         return session
 
     sessions = manager.get_sessions()
-    if sessions and len(sessions) > 0:
+    if sessions:
         return sessions[0]
 
     return None

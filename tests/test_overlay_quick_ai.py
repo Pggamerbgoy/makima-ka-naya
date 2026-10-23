@@ -12,14 +12,13 @@ Validates:
 
 import sys
 import pathlib
-import tkinter as tk
 
 # Ensure makima_v2 root in sys.path
 makima_root = pathlib.Path(__file__).resolve().parent.parent
 if str(makima_root) not in sys.path:
     sys.path.insert(0, str(makima_root))
 
-from makima.overlay.hud import SpotlightHUD, PALETTE
+from makima.overlay.hud import SpotlightHUD
 
 
 def test_app_name_resolution():

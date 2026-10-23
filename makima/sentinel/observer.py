@@ -13,10 +13,9 @@ import asyncio
 import ctypes
 import json
 import logging
-import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import psutil
 import win32con

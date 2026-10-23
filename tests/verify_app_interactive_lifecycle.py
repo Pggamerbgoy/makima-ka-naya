@@ -15,7 +15,6 @@ Test Flow:
 from __future__ import annotations
 
 import datetime
-import os
 import pathlib
 import sys
 import time
@@ -33,7 +32,7 @@ from makima.tools.desktop.uia import (
 from makima.tools.os.apps import launch_app
 from makima.tools.os.notifications import show_desktop_notification
 from makima.tools.os.processes import terminate_process
-from makima.tools.os.windows import _find_target_window, list_open_windows
+from makima.tools.os.windows import _find_target_window
 
 
 def test_interactive_notepad_lifecycle() -> None:
@@ -52,7 +51,7 @@ def test_interactive_notepad_lifecycle() -> None:
         launch_res = launch_app("notepad.exe", args=[str(test_file)])
         print(f"[2/8] Launch outcome: success={launch_res.get('success')}, PID={launch_res.get('pid')}")
         assert launch_res.get("success"), f"Launch failed: {launch_res}"
-        target_pid = launch_res.get("pid")
+        launch_res.get("pid")
 
         # Give window a moment to initialize
         time.sleep(2.0)

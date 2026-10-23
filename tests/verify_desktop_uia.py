@@ -20,9 +20,7 @@ from makima.tools.os.windows import list_open_windows
 from makima.tools.desktop.uia import (
     inspect_app_ui,
     click_ui_element,
-    set_ui_text,
     read_ui_text,
-    send_keys_to_app,
     _element_to_dict,
 )
 

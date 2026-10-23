@@ -16,8 +16,6 @@ Comprehensive testing covering:
 import asyncio
 import email.message
 import email.utils
-import os
-import shutil
 import sys
 import tempfile
 from email.mime.application import MIMEApplication
@@ -32,7 +30,7 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.core.engine import EngineResult, HermesAgentEngine
+from makima.core.engine import EngineResult
 from makima.gateway.adapters import (
     EmailAdapter,
     WhatsAppAdapter,

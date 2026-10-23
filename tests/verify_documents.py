@@ -13,7 +13,6 @@ Comprehensive testing covering:
 
 import asyncio
 import os
-import shutil
 import sys
 import tempfile
 from datetime import date
@@ -35,7 +34,6 @@ from makima.tools.documents import (
 )
 from makima.tools.filesystem.safe_io import (
     BoundaryTraversalError,
-    get_workspace_dir,
     set_workspace_dir,
 )
 

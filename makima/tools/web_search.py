@@ -42,18 +42,6 @@ def _get_tavily_api_key() -> Optional[str]:
     if key and key.strip():
         return key.strip()
 
-    # Check project .env
-    for env_path in (Path(".env"), Path(__file__).resolve().parent.parent.parent / ".env"):
-        if env_path.is_file():
-            try:
-                from dotenv import dotenv_values
-                env_vals = dotenv_values(str(env_path))
-                k = env_vals.get("TAVILY_API_KEY")
-                if k and k.strip():
-                    return k.strip()
-            except Exception:
-                pass
-
     # Check user config (~/.tavily/config.json)
     config_file = Path.home() / ".tavily" / "config.json"
     if config_file.is_file():

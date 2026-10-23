@@ -9,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 from makima.api import create_app
 from makima.plugins import PluginManager
-from makima.tools.registry import ToolRegistry
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,6 @@ Live Verification Script: Proving the Exact Capabilities Discussed in Chat
 """
 
 import sys
-import os
 import pathlib
 import time
 

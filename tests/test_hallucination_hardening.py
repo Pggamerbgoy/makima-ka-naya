@@ -14,7 +14,7 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.tools.registry import ToolRegistry, tool
+from makima.tools.registry import ToolRegistry
 from makima.tools.browser.automation import browser_interact
 from makima.tools.terminal.runner import resolve_command_args
 from makima.provider.adapters.base import Message

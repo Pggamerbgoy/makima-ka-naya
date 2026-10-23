@@ -10,14 +10,12 @@ Zero-Duplication Guarantee: Single canonical normalization, schema canonicalizat
 from __future__ import annotations
 
 from enum import Enum
-import hashlib
 import json
 import logging
 import threading
-import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
-from makima.provider.adapters.base import Message, ToolCall
+from makima.provider.adapters.base import Message
 
 logger = logging.getLogger("makima.provider.cache")
 

@@ -21,7 +21,6 @@ Tests:
 """
 
 import asyncio
-import os
 import shutil
 import sys
 import tempfile
@@ -37,7 +36,7 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.tools import ToolRegistry, get_registry, reset_registry
+from makima.tools import get_registry, reset_registry
 from makima.tools.browser import browse_page, fetch_web_page, search_web
 from makima.tools.documents import (
     create_excel_sheet,

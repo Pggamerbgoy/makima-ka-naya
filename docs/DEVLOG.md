@@ -4,6 +4,65 @@
 
 ## 📅 2026-10-23
 
+### Entry 19: Full-Codebase Multi-Subagent Dead Code Eradication, Windows Terminal Quoting Hardening & Zero-Regression Clean-Up
+- **Context**: Autonomous multi-subagent line-by-line inspection across all modules in `makima/core/`, `makima/tools/`, and test suites to eliminate dead code, redundant branches, unreferenced variables, and memory leaks.
+- **Decisions & Tradeoffs**:
+  1. **Core HTTP Pool Clean-Up (`makima/core/http_pool.py`)**:
+     - *Issue*: `class HTTPPool` (25 lines) was completely unused (all consumers import functions directly). Line 73 contained mathematically unreachable re-init loop check.
+     - *Solution*: Removed unused `class HTTPPool` and unreachable branch, leaving clean direct function exports.
+  2. **Context Compressor Invariant Simplification (`makima/core/context.py`)**:
+     - *Issue*: Invariants in `_clamp_large_message` and `compress` guaranteed `omitted > 0` and `middle` is non-empty, making defensive checks unreachable.
+     - *Solution*: Removed dead checks `if omitted <= 0:` and `if not middle:`, streamlining execution paths.
+  3. **Engine Memory Flag & Attribute Fallback (`makima/core/engine.py`)**:
+     - *Issue*: `_MEMORY_AVAILABLE` was set but never referenced. `self._last_model_used` was a phantom attribute that never existed on `HermesAgentEngine`.
+     - *Solution*: Removed `_MEMORY_AVAILABLE`, replaced phantom attribute with `getattr(self, "model", getattr(self.router, "default_model", "hermes-agent"))`, and moved `matching = []` initialization outside the keyword loop.
+  4. **Insidious Windows Subprocess Argument Quoting Bug (`makima/tools/terminal/runner.py`)**:
+     - *Issue*: On Windows, `shlex.split(..., posix=False)` retained outer quotes on arguments. When passed to `asyncio.create_subprocess_exec`, `subprocess.list2cmdline` re-quoted them, turning `python -c "..."` code into double-quoted string literals. Python simply evaluated the string expression and exited with code 0 instead of executing the code.
+     - *Solution*: Stripped matching outer quotes from `parts` on Windows before dispatching to `create_subprocess_exec`, ensuring clean exit code propagation (e.g. exit 42) and passing `tests/verify_terminal.py`.
+  5. **Headless Browser Window Isolation & Error Guidance (`makima/tools/browser/automation.py`)**:
+     - *Issue*: `navigate` fell back to desktop window automation (`ctrl+l` in Chrome) even during headless tests, hijacking active user windows. `browse_page` did not catch missing Playwright binary exceptions.
+     - *Solution*: Guarded desktop GUI fallback with `if not self._is_headless:`. Added friendly Playwright binary installation advice catch in `browse_page`.
+  6. **Media Player Persistent Sync Client Reuse (`makima/tools/media/play_song.py` & `playback.py`)**:
+     - *Issue*: `_play_youtube` allocated a single-use `ThreadPoolExecutor` and ran `asyncio.run` inside a synchronous function. `opened if auto_open else False` was a redundant ternary.
+     - *Solution*: Replaced 30 lines of threadpool/async gymnastics with `get_shared_sync_client()`. Removed redundant ternaries and simplified truthy sequence checks.
+  7. **Process Enumeration N+1 Syscall Elimination (`makima/tools/os/processes.py`)**:
+     - *Issue*: `process_iter` omitted `"memory_info"`, causing `proc.memory_info()` to make 250+ individual Win32 syscalls per listing.
+     - *Solution*: Added `"memory_info"` to pre-fetched attributes in `process_iter` and removed duplicate CPU sorting branch.
+  8. **Scheduler Single-Pass Search & Memory Leak Cap (`makima/tools/automation/cronjob.py`)**:
+     - *Issue*: `_find_job` looped over `scheduler.get_jobs()` twice. `_EXECUTION_HISTORY` grew unbounded in long-running daemons.
+     - *Solution*: Consolidated `_find_job` into a single loop pass. Capped `_EXECUTION_HISTORY` to 500 entries.
+  9. **Search Disk I/O Elimination (`makima/tools/web_search.py`)**:
+     - *Issue*: Probed `.env` on disk on every search call even though environment is loaded during startup.
+     - *Solution*: Removed redundant `.env` disk-parsing loop.
+  10. **Standard Python 3.12+ Async Inspection (`makima/tools/registry.py`)**:
+      - *Issue*: Calling deprecated `asyncio.iscoroutinefunction` produced 52 deprecation warnings in test runs.
+      - *Solution*: Replaced with standard `inspect.iscoroutinefunction(fn)`. Removed unused `PARALLEL_SAFE_TAGS` and `MUTATING_TAGS` aliases.
+  11. **Type & Name Resolution Integrity (`makima/gateway/inbox.py`, `makima/tools/desktop/input.py`, `makima/overlay/hud.py`, `tests/`)**:
+      - *Issue*: Ruff identified 8 undefined name (F821) errors where `Union`, `Optional`, or unbound `exc` in closures were referenced.
+      - *Solution*: Fixed missing imports and bound exception strings before dispatching Tkinter GUI error handlers.
+- **Verification & Outcome**:
+  - `tests/verify_engine.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_sentinel.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_gateway_core.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_memory.py`: ALL 9 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_terminal.py`: ALL 7 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_cronjob.py`: ALL 10 STAGES PASSED (27/27, EXIT CODE 0).
+  - `tests/verify_browser.py`: ALL 5 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_media_player.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_browser_media.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_filesystem.py`: ALL 9 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_documents.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_desktop_uia.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_tool_registry.py`: ALL 6 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_cli.py`: ALL 7 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_implicit_preferences.py`: ALL 5 STAGES PASSED (EXIT CODE 0).
+  - `python -m pytest tests/test_smoke.py`: 19/19 PASSED (100%).
+  - `python -m ruff check makima/ --select F401,F821`: ALL CHECKS PASSED (0 ERRORS).
+
+---
+
+## 📅 2026-10-23
+
 ### Entry 18: 100% KV-Cache Hit Architecture, Dynamic Intent Tool Pruning, Presidio Fast Gate & Persistent Sync HTTP Pooling
 - **Context**: Advanced architectural optimization targeting TTFT (Time To First Token), LLM prompt caching efficiency, CPU spike reduction during PII filtering, and connection reuse across background OS daemons.
 - **Decisions & Tradeoffs**:

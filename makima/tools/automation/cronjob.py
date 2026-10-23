@@ -160,6 +160,8 @@ async def _cron_job_executor(job_id: str, name: str, prompt: str) -> Dict[str, A
             logger.error("Error in cronjob notification handler: %s", exc, exc_info=True)
 
     _EXECUTION_HISTORY.append(payload)
+    if len(_EXECUTION_HISTORY) > 500:
+        del _EXECUTION_HISTORY[: len(_EXECUTION_HISTORY) - 500]
 
     return {
         "job_id": job_id,
@@ -275,18 +277,16 @@ def _find_job(scheduler: AsyncIOScheduler, target: str) -> Optional[Job]:
     if job is not None:
         return job
 
-    # 2. Exact Name match
+    # 2. Single-pass Name or Case-insensitive match
+    target_lower = target.lower()
+    fallback_job = None
     for j in scheduler.get_jobs():
         if j.name == target:
             return j
+        if fallback_job is None and (j.id.lower() == target_lower or (j.name and j.name.lower() == target_lower)):
+            fallback_job = j
 
-    # 3. Case-insensitive ID or Name match
-    target_lower = target.lower()
-    for j in scheduler.get_jobs():
-        if j.id.lower() == target_lower or (j.name and j.name.lower() == target_lower):
-            return j
-
-    return None
+    return fallback_job
 
 
 # ---------------------------------------------------------------------------

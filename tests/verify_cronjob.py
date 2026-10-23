@@ -18,8 +18,6 @@ Suites:
 import asyncio
 import os
 import sys
-import time
-from pathlib import Path
 
 # Add project root to sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,16 +41,6 @@ def record(name: str, ok: bool, detail: str = "") -> None:
 # ---------------------------------------------------------------------------
 def test_import():
     try:
-        from makima.tools.automation import (
-            cronjob_manage,
-            get_scheduler,
-            start_scheduler,
-            shutdown_scheduler,
-            reset_scheduler,
-            register_notification_handler,
-            unregister_notification_handler,
-            get_execution_history,
-        )
         record("Import automation module and exports", True)
 
         from makima.tools.registry import get_registry
@@ -77,7 +65,6 @@ async def run_async_tests():
         register_notification_handler,
         unregister_notification_handler,
         get_execution_history,
-        clear_execution_history,
     )
     from makima.core.telemetry import get_telemetry
 

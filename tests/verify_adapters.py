@@ -18,19 +18,18 @@ Comprehensive testing covering:
 
 import asyncio
 import os
-import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any, Dict, List
+from unittest.mock import AsyncMock, MagicMock
 
 # Ensure repo root is on sys.path
 repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.core.engine import EngineResult, HermesAgentEngine
+from makima.core.engine import EngineResult
 from makima.gateway.adapters import (
     BaseAdapter,
     DiscordAdapter,

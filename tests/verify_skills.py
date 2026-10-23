@@ -10,7 +10,6 @@ Tests:
 """
 
 import asyncio
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -20,8 +19,8 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.skills import Skill, SkillsLoader, get_skills_loader, save_learned_skill
-from makima.tools import ToolRegistry, get_registry, reset_registry
+from makima.skills import SkillsLoader, get_skills_loader
+from makima.tools import ToolRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +258,7 @@ async def test_save_learned_skill_tool():
 
         # Discover skills tools in isolated ToolRegistry
         reg = ToolRegistry(name="test_skills_reg")
-        count = reg.discover("makima.skills")
+        reg.discover("makima.skills")
         assert "save_learned_skill" in reg
 
         # 1. Invalid skill name rejection

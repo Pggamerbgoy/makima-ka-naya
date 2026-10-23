@@ -12,21 +12,19 @@ Methodology (4-Tier Dual Track):
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import httpx
 
-from makima.core.context import ContextCompressor, TokenCounter, count_tokens
+from makima.core.context import ContextCompressor, count_tokens
 from makima.core.engine import EngineResult, HermesAgentEngine
-from makima.core.guardrails import DangerousCommandError, Guardrails, filter_secrets
 from makima.memory.episodic import EpisodicMemory
 from makima.memory.reflection import ImplicitPreferenceLearner
 from makima.memory.state import StateMemory

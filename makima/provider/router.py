@@ -12,7 +12,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
 
 from makima.config import BackendConfig, MakimaSettings, get_settings
 from makima.provider.adapters.base import BaseProvider, Message, ProviderResponse

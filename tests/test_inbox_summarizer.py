@@ -3,12 +3,9 @@ tests/test_inbox_summarizer.py — Comprehensive Unit & Integration Tests for
 Universal Inbox Summarizer, Zero-Waste Priority Classifier, and Proactive Alerts.
 """
 
-import asyncio
-import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +16,6 @@ from makima.gateway.inbox import (
     InboxStore,
     PriorityClassifier,
     PriorityLevel,
-    get_inbox_manager,
     reset_inbox_manager,
 )
 from makima.tools.messaging.inbox import (

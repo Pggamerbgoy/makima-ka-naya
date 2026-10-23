@@ -9,8 +9,6 @@ Validates:
   6. Multi-Stage Compression Continuity (Chained compression without losing milestones).
 """
 
-import json
-import math
 import sys
 from pathlib import Path
 from typing import List
@@ -22,7 +20,7 @@ if str(repo_root) not in sys.path:
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from makima.core.context import ContextCompressor, TokenCounter, count_tokens
+from makima.core.context import ContextCompressor
 from makima.provider.adapters.base import Message, ToolCall
 
 

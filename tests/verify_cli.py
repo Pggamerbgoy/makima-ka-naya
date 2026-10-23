@@ -9,7 +9,7 @@ from __future__ import annotations
 import io
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 from unittest.mock import MagicMock
 
 # Add project root to sys.path
@@ -20,10 +20,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from rich.console import Console
 
 from makima.cli import cli_main
-from makima.cli.main import build_parser, setup_gateway_daemon
+from makima.cli.main import build_parser
 from makima.core.engine import EngineResult
 from makima.provider.adapters.base import Message, ProviderResponse, ToolCall
-from makima.tools.registry import Tool, ToolRegistry, get_registry
 
 
 # -----------------------------------------------------------------------------

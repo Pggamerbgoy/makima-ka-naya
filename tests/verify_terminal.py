@@ -14,7 +14,6 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -24,18 +23,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from makima.core.guardrails import DangerousCommandError, Guardrails
-from makima.tools.registry import get_registry, reset_registry
+from makima.core.guardrails import DangerousCommandError
+from makima.tools.registry import get_registry
 from makima.tools.terminal import (
     CommandTimeoutError,
-    ConPTYManager,
     ConPTYSession,
     clamp_to_workspace,
     execute_command,
     get_conpty_manager,
-    get_workspace_dir,
-    strip_ansi_escapes,
-    truncate_output,
 )
 from makima.tools.terminal.conpty import PYWINPTY_AVAILABLE
 

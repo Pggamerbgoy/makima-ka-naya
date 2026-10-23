@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from makima.core.engine import EngineResult, HermesAgentEngine
 from makima.tools.registry import ToolRegistry

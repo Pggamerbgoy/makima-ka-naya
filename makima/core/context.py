@@ -203,9 +203,6 @@ class ContextCompressor:
             return msg
 
         omitted = len(msg.content) - (head_len + tail_len)
-        if omitted <= 0:
-            return msg
-
         clamped_content = (
             f"{msg.content[:head_len]}\n"
             f"[... truncated {omitted} characters ...]\n"
@@ -358,9 +355,6 @@ class ContextCompressor:
 
         tail = clamped_messages[tail_start:]
         middle = clamped_messages[head_end:tail_start]
-
-        if not middle:
-            return clamped_messages
 
         # 4. Generate structured summary of middle turns
         summary_body = self._summarize_middle_turns(middle)

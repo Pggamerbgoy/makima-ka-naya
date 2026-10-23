@@ -16,7 +16,6 @@ Tests all buttons, toggles, event bindings, drag handles, confirmation flows, an
 import sys
 import pathlib
 import time
-import tkinter as tk
 
 # Ensure utf-8 stdout on Windows console
 if hasattr(sys.stdout, "reconfigure"):

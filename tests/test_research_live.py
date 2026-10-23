@@ -21,7 +21,7 @@ from makima.core.engine import HermesAgentEngine
 from makima.provider.adapters.base import Message
 from makima.provider.adapters.openai_compatible import OpenAICompatibleProvider
 from makima.provider.circuit_breaker import CircuitBreaker
-from makima.tools.web_search import fetch_page, web_search
+from makima.tools.web_search import fetch_page
 
 
 async def test_research_market_and_diagrams():

@@ -10,7 +10,6 @@ Tests:
 
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 # Ensure makima is importable
@@ -18,7 +17,7 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from makima.config import get_settings, resolve_path, MakimaSettings
+from makima.config import get_settings
 
 
 def test_config_loading():

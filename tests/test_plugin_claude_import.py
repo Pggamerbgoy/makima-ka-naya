@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from makima.plugins.importer import import_claude_desktop_config
 
 

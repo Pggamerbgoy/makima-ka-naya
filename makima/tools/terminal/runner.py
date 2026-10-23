@@ -194,9 +194,17 @@ def resolve_command_args(command: str) -> Tuple[str, List[str]]:
     first_token = parts[0].lower()
     has_shell_operators = any(ch in cmd_clean for ch in ("|", ">", "<", "&", "^" if sys.platform == "win32" else ";"))
 
+    # When posix=False on Windows, shlex retains outer quotes on arguments.
+    # Because subprocess.list2cmdline automatically re-quotes arguments containing spaces,
+    # keeping literal quotes turns Python code strings into string literals or double-quoted args.
+    clean_parts = [
+        tok[1:-1] if (len(tok) >= 2 and ((tok[0] == '"' and tok[-1] == '"') or (tok[0] == "'" and tok[-1] == "'"))) else tok
+        for tok in parts
+    ]
+
     # Resolve python/python3 directly to the running Python interpreter to avoid WindowsApps execution alias collisions
     if first_token in ("python", "python3", "python.exe"):
-        return sys.executable, parts[1:]
+        return sys.executable, clean_parts[1:]
 
     if sys.platform == "win32":
         if (

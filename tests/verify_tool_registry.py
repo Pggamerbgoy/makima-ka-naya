@@ -10,7 +10,6 @@ Tests:
 """
 
 import asyncio
-import os
 import shutil
 import sys
 import tempfile
@@ -24,12 +23,9 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from makima.tools import (
-    Tool,
-    ToolError,
     ToolExecutionError,
     ToolNotFoundError,
     ToolRegistry,
-    ToolValidationError,
     get_registry,
     reset_registry,
     tool,

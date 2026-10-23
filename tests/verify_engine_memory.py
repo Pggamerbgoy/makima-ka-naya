@@ -21,7 +21,7 @@ if str(repo_root) not in sys.path:
 
 from makima.core import HermesAgentEngine
 from makima.memory import EpisodicMemory, StateMemory
-from makima.provider.adapters.base import BaseProvider, Message, ProviderResponse, ToolCall
+from makima.provider.adapters.base import BaseProvider, Message, ProviderResponse
 from makima.provider.router import ParetoCandidate, ParetoRouter
 
 

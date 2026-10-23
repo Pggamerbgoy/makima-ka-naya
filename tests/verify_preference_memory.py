@@ -15,7 +15,6 @@ Tests:
 
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -48,7 +47,7 @@ def test_preference_and_memory_tools():
         memory_file = tmp_path / "MEMORY.md"
 
         # Patch StateMemory instance to test isolated in tmp_dir
-        sm = StateMemory(data_dir=tmp_path)
+        StateMemory(data_dir=tmp_path)
         assert user_file.exists()
         assert memory_file.exists()
 
