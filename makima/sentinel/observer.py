@@ -9,6 +9,7 @@ Zero new pip packages — uses only psutil, win32gui, win32process, ctypes (all 
 
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import json
 import logging
@@ -64,12 +65,13 @@ def _get_data_dir() -> Path:
 def _get_idle_seconds() -> float:
     """Returns seconds since last mouse/keyboard input using Win32 LASTINPUTINFO."""
     class LASTINPUTINFO(ctypes.Structure):
-        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_ulong)]
+        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
 
     lii = LASTINPUTINFO()
     lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
     if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
-        elapsed_ms = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        tick_count = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+        elapsed_ms = (tick_count - lii.dwTime) & 0xFFFFFFFF
         return max(0.0, elapsed_ms / 1000.0)
     return 0.0
 
@@ -154,17 +156,28 @@ def _is_fullscreen(hwnd: int) -> bool:
         return False
 
 
-def _get_clipboard_preview() -> str:
+def _get_clipboard_preview(active_process: str = "") -> str:
     """Returns first CLIPBOARD_PREVIEW_LEN chars of clipboard text, masked and stripped of newlines."""
+    try:
+        from makima.sentinel.event_daemon import BLOCKED_SENSITIVE_PROCESSES, get_sentinel_daemon
+        if active_process and active_process.lower() in BLOCKED_SENSITIVE_PROCESSES:
+            return "[SENSITIVE_APP_SKIPPED]"
+        daemon = get_sentinel_daemon()
+        if daemon and daemon._clipboard_watcher and daemon.is_running:
+            return daemon._clipboard_watcher._latest_preview
+    except Exception:
+        pass
+
     try:
         import win32clipboard
         win32clipboard.OpenClipboard()
         try:
-            data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-            if data:
-                preview = " ".join(str(data).split())[:CLIPBOARD_PREVIEW_LEN]
-                from makima.core.guardrails import mask_sensitive_data
-                return mask_sensitive_data(preview)
+            if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                if data:
+                    preview = " ".join(str(data).split())[:CLIPBOARD_PREVIEW_LEN]
+                    from makima.core.guardrails import mask_sensitive_data
+                    return mask_sensitive_data(preview)
         finally:
             win32clipboard.CloseClipboard()
     except Exception:
@@ -190,13 +203,18 @@ async def take_snapshot() -> Dict[str, Any]:
     """
     Captures a single activity snapshot and appends it to observations.jsonl.
     Called by APScheduler every 60 seconds.
+    Non-blocking: offloaded to background thread.
     Returns the snapshot dict for testing/logging.
     """
+    return await asyncio.to_thread(_take_snapshot_sync)
+
+
+def _take_snapshot_sync() -> Dict[str, Any]:
     now = datetime.now()
     window = _get_active_window()
     idle = _get_idle_seconds()
     fullscreen = _is_fullscreen(window.get("hwnd", 0))
-    clipboard = _get_clipboard_preview()
+    clipboard = _get_clipboard_preview(window.get("process", ""))
 
     snapshot: Dict[str, Any] = {
         "ts": now.isoformat(timespec="seconds"),

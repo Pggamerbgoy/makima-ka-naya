@@ -109,7 +109,7 @@ async def run_habit_analysis() -> Dict[str, Any]:
     pattern_dates: Dict[tuple, set] = defaultdict(set)
 
     for obs in observations:
-        proc = obs.get("active_process", "").strip()
+        proc = obs.get("active_process", "").strip().lower()
         if not proc:
             continue
         # Skip idle snapshots (user away from desk > 5 min)
@@ -142,12 +142,33 @@ async def run_habit_analysis() -> Dict[str, Any]:
         except Exception:
             pass
 
+    # 30 days me ek specific weekday max ~4.3 baar aata hai
+    max_possible_weekday_occurrences = max(1.0, MAX_AGE_DAYS / 7.0)
+
+    # Read rejection_log from proactive_state.json if available
+    rejections: Dict[str, int] = defaultdict(int)
+    proactive_state_path = data_dir / "proactive_state.json"
+    if proactive_state_path.exists():
+        try:
+            p_state = json.loads(proactive_state_path.read_text(encoding="utf-8"))
+            for entry in p_state.get("rejection_log", []):
+                h_id = entry.get("habit_id")
+                if h_id:
+                    rejections[h_id] += 1
+        except Exception:
+            pass
+
     for (weekday, hour, process), day_set in pattern_dates.items():
         if len(day_set) < CONFIRMATION_DAYS:
             continue
 
         habit_id = _build_habit_id(weekday, hour, process)
-        confidence = min(1.0, round(len(day_set) / max(MAX_AGE_DAYS, 1), 2))
+        raw_confidence = min(1.0, round(len(day_set) / max_possible_weekday_occurrences, 2))
+
+        # Rejection decay: if rejected by user, reduce confidence and suppress if >= 3 rejections
+        reject_count = rejections.get(habit_id, 0)
+        is_confirmed = reject_count < 3
+        confidence = max(0.0, round(raw_confidence - 0.2 * reject_count, 2))
 
         # Preserve existing metadata if available
         existing = existing_habits.get(habit_id, {})
@@ -160,12 +181,11 @@ async def run_habit_analysis() -> Dict[str, Any]:
             "hour_end": hour + 1,
             "apps": [process],
             "confidence": confidence,
-            "confirmed": True,
+            "confirmed": is_confirmed,
             "last_updated": date.today().isoformat(),
             "sample_days": sorted(day_set),
+            "rejections": reject_count,
         }
-
-        # Merge weekdays if we've seen this hour/process on multiple days
         confirmed.append(habit)
 
     # -----------------------------------------------------------------------

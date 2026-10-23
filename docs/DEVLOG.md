@@ -4,6 +4,39 @@
 
 ## 📅 2026-10-23
 
+### Entry 17: Sentinel OS Watcher Hardening, Stateful CPU Accounting, Win32 Clipboard Mutex Optimization & Habit Rejection Decay
+- **Context**: Comprehensive hardening and adversarial bug remediation across Sentinel OS monitoring modules (`event_daemon.py`, `observer.py`, `proactive_daemon.py`, `habit_engine.py`) to eliminate race conditions, OS clipboard mutex lockups, Win32 integer overflows, and uncalibrated proactive prompts.
+- **Decisions & Tradeoffs**:
+  1. **Win32 Tick Count Wrap-Around Guard (`makima/sentinel/observer.py`)**:
+     - *Issue*: `ctypes.windll.user32.GetTickCount() - lii.dwTime` wraps around every 24.8 days in 32-bit Windows systems, producing massive negative numbers and breaking idle detection.
+     - *Solution*: Masked arithmetic with `& 0xFFFFFFFF` to guarantee unsigned 32-bit wrap-around safety.
+  2. **Stateful Per-Process CPU Accounting (`makima/sentinel/event_daemon.py`)**:
+     - *Issue*: Calling `psutil.process_iter(["cpu_percent"])` without prior baseline always returns `0.0%`, rendering runaway CPU alerts dead.
+     - *Solution*: Retained active process objects across polling cycles in `self._proc_cache: Dict[int, psutil.Process]`, sampling deltas and normalizing by `psutil.cpu_count()`.
+  3. **Downloads Event Debounce & Cleanup (`makima/sentinel/event_daemon.py`)**:
+     - *Issue*: Files added to `self._recently_handled` were never purged, permanently ignoring re-downloaded files or slow downloads.
+     - *Solution*: Added a `finally` timer block (`threading.Timer(30.0, ...)`) to reliably discard handled paths from cache.
+  4. **PID Recycling Protection on Action Toast (`makima/sentinel/event_daemon.py`)**:
+     - *Issue*: Delayed user clicks on toast notifications could terminate an innocent new process if Windows recycled the PID.
+     - *Solution*: Verified `psutil.Process(event.pid).name().lower() == event.process_name.lower()` before killing runaway tasks.
+  5. **Double Clipboard Polling & Mutex Contention Optimization (`makima/sentinel/event_daemon.py` & `observer.py`)**:
+     - *Issue*: Both `ClipboardEventWatcher` (250ms polling) and `observer.py` (60s snapshot) opened Win32 clipboard, risking mutex lock contention.
+     - *Solution*: `ClipboardEventWatcher` caches the latest masked preview in `self._latest_preview`. `_get_clipboard_preview()` in `observer.py` retrieves this cached value when the daemon is running, bypassing Win32 calls entirely.
+  6. **Habit Window Midnight Wrap-Around & Rejection Decay (`makima/sentinel/proactive_daemon.py` & `habit_engine.py`)**:
+     - *Issue*: Midnight routines (`hour_start = 0`) never triggered early notifications, and rejected habits kept nagging users.
+     - *Solution*: Supported midnight wrap-around (firing at 23:45-23:59 on prior day). Connected `rejection_log` from `proactive_state.json` to penalize confidence by 0.2 per dismissal and suppress habits (`confirmed: False`) after 3 rejections. Calibrated confidence using `max(1.0, MAX_AGE_DAYS / 7.0)`.
+  7. **Non-Blocking Async Event Loop Offloading (`makima/sentinel/observer.py` & `proactive_daemon.py`)**:
+     - *Issue*: Synchronous Win32 GUI calls (`GetWindowRect`, `OpenClipboard`) blocked the APScheduler async loop.
+     - *Solution*: Offloaded `take_snapshot()` and `evaluate_and_act()` to worker threads via `asyncio.to_thread()`.
+- **Verification & Outcome**:
+  - `tests/verify_sentinel.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_engine.py`: ALL 8 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_gateway_core.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_memory.py`: ALL 9 STAGES PASSED (EXIT CODE 0).
+  - `tests/verify_engine_memory.py`: ALL 4 STAGES PASSED (EXIT CODE 0).
+
+---
+
 ### Entry 16: Comprehensive Subsystem Audit, HTTP Connection Pooling, Fault-Tolerant Memory & Zero-Hardcoding Guarantees
 - **Context**: The user requested a full-codebase adversarial audit and structural hardening across Makima's Core, Sentinel, Memory, Gateway, and Tools subsystems to eradicate hardcoded endpoints, connection overhead, memory deadlocks, and silent failure modes before publishing the repository.
 - **Decisions & Tradeoffs**:

@@ -10,6 +10,7 @@ Rejection: snooze_until = now + 4 hours.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -135,15 +136,14 @@ def _check_habit_window(habits: List[Dict[str, Any]], now: datetime) -> Optional
     Fires if current time falls within:
       1. ±HABIT_WINDOW_MINUTES (15m) before habit start (preparation moment)
       2. OR actively inside the habit duration [hour_start, hour_end)
+    Supports midnight wrap-around (e.g. 23:45 alert for a 00:00 midnight habit).
     """
     now_min = now.hour * 60 + now.minute
     weekday = now.strftime("%A")
+    tomorrow_weekday = (now + timedelta(days=1)).strftime("%A")
 
     for habit in habits:
         habit_days = habit.get("weekdays", [])
-        if habit_days and weekday not in habit_days:
-            continue
-
         h_start = habit.get("hour_start", -1)
         if h_start < 0:
             continue
@@ -152,13 +152,22 @@ def _check_habit_window(habits: List[Dict[str, Any]], now: datetime) -> Optional
         start_min = h_start * 60
         end_min = h_end * 60
 
-        # Trigger if within 15 min prior to start or inside the active habit window
-        if (start_min - HABIT_WINDOW_MINUTES <= now_min < end_min):
+        # Normal same-day window check
+        if (not habit_days or weekday in habit_days) and (start_min - HABIT_WINDOW_MINUTES <= now_min < end_min):
             logger.info(
                 "Proactive daemon: Trigger B (Habit Window) fired — habit: %s",
                 habit.get("label", habit.get("id", "unknown")),
             )
             return habit
+
+        # Midnight wrap-around check (e.g., 23:45 for a 00:00 habit on tomorrow's weekday)
+        if h_start == 0 and (not habit_days or tomorrow_weekday in habit_days):
+            if now_min >= (1440 - HABIT_WINDOW_MINUTES):
+                logger.info(
+                    "Proactive daemon: Trigger B (Habit Window - Midnight Prior) fired — habit: %s",
+                    habit.get("label", habit.get("id", "unknown")),
+                )
+                return habit
     return None
 
 
@@ -316,23 +325,20 @@ def _dispatch_toast(
 async def evaluate_and_act() -> None:
     """
     Main proactive daemon entry point. Called by APScheduler every 5 minutes.
+    Non-blocking: offloads evaluation and HTTP suggestion to background thread.
     Sequential gate logic → trigger detection → brain call → toast.
     """
+    await asyncio.to_thread(_evaluate_and_act_sync)
+
+
+def _evaluate_and_act_sync() -> None:
     global _prev_snapshot
 
     now = datetime.now()
     data_dir = _get_data_dir()
     state = _load_state(data_dir)
 
-    # --- Gate 1: Anti-fatigue ---
-    if _gate_anti_fatigue(state, now):
-        return
-
-    # --- Gate 2: Snooze ---
-    if _gate_snooze(state, now):
-        return
-
-    # --- Get latest snapshot for DND + trigger checks ---
+    # Always fetch latest snapshot first so _prev_snapshot remains fresh across all cycles
     obs_path = data_dir / "observations.jsonl"
     curr_snapshot: Dict[str, Any] = {}
     if obs_path.exists():
@@ -346,9 +352,20 @@ async def evaluate_and_act() -> None:
         except Exception:
             pass
 
+    prev_snap = _prev_snapshot
+    if curr_snapshot:
+        _prev_snapshot = curr_snapshot
+
+    # --- Gate 1: Anti-fatigue ---
+    if _gate_anti_fatigue(state, now):
+        return
+
+    # --- Gate 2: Snooze ---
+    if _gate_snooze(state, now):
+        return
+
     # --- Gate 3: DND check ---
     if curr_snapshot and _gate_dnd(curr_snapshot):
-        _prev_snapshot = curr_snapshot
         return
 
     # --- Trigger detection ---
@@ -361,8 +378,8 @@ async def evaluate_and_act() -> None:
         "habit_label": "your routine",
     }
 
-    # Trigger A: User Return
-    if _check_user_return(_prev_snapshot, curr_snapshot):
+    # Trigger A: User Return (using captured prev_snap)
+    if _check_user_return(prev_snap, curr_snapshot):
         trigger_type = "user_return"
 
     # Trigger B: Habit Window (only if Trigger A didn't fire)
@@ -374,9 +391,6 @@ async def evaluate_and_act() -> None:
             trigger_type = "habit_window"
             context["habit_label"] = matched_habit.get("label", "your routine")
             context["app_label"] = matched_habit.get("apps", [context["active_process"]])[0]
-
-    # Update prev snapshot regardless
-    _prev_snapshot = curr_snapshot if curr_snapshot else _prev_snapshot
 
     if trigger_type is None:
         logger.debug("Proactive daemon: no trigger fired this cycle.")

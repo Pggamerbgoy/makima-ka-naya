@@ -265,6 +265,7 @@ class ClipboardEventWatcher:
         self._thread: Optional[threading.Thread] = None
         self._last_seq = 0
         self._last_content_hash = ""
+        self._latest_preview: str = ""
 
     def start(self) -> None:
         """Starts the clipboard polling worker thread."""
@@ -329,23 +330,30 @@ class ClipboardEventWatcher:
                     proc_name = (active_win.get("process") or "").lower()
                     if proc_name in BLOCKED_SENSITIVE_PROCESSES:
                         logger.debug("Clipboard read skipped: Active window is sensitive password manager (%s)", proc_name)
+                        self._latest_preview = "[SENSITIVE_APP_SKIPPED]"
                     else:
                         text = self._read_clipboard_text()
-                        if text and len(text.strip()) >= 15:
-                            content_hash = str(hash(text[:500]))
-                            if content_hash != self._last_content_hash:
-                                self._last_content_hash = content_hash
-                                trace_info = StackTraceAnalyzer.detect(text)
-                                if trace_info:
-                                    logger.info(
-                                        "Clipboard stack trace detected: [%s] %s in %s",
-                                        trace_info.language,
-                                        trace_info.error_type,
-                                        active_win.get("process", "unknown"),
-                                    )
-                                    self.on_stack_trace(trace_info, active_win)
-                                elif self.on_clipboard_text:
-                                    self.on_clipboard_text(text, active_win)
+                        if text:
+                            preview = " ".join(text.split())[:120]
+                            from makima.core.guardrails import mask_sensitive_data
+                            self._latest_preview = mask_sensitive_data(preview)
+                            if len(text.strip()) >= 15:
+                                content_hash = str(hash(text[:500]))
+                                if content_hash != self._last_content_hash:
+                                    self._last_content_hash = content_hash
+                                    trace_info = StackTraceAnalyzer.detect(text)
+                                    if trace_info:
+                                        logger.info(
+                                            "Clipboard stack trace detected: [%s] %s in %s",
+                                            trace_info.language,
+                                            trace_info.error_type,
+                                            active_win.get("process", "unknown"),
+                                        )
+                                        self.on_stack_trace(trace_info, active_win)
+                                    elif self.on_clipboard_text:
+                                        self.on_clipboard_text(text, active_win)
+                        else:
+                            self._latest_preview = ""
             except Exception as exc:
                 logger.debug("Error in clipboard watcher loop: %s", exc)
 
@@ -418,24 +426,23 @@ class _DownloadsEventHandler(FileSystemEventHandler):
                 return
             self._recently_handled.add(str(path))
 
-        # Size stabilization check (wait up to 3s for download completion)
-        prev_size = -1
-        stable = False
-        for _ in range(4):
-            time.sleep(0.5)
-            if not path.exists():
-                return
-            try:
-                curr_size = path.stat().st_size
-                if curr_size > 0 and curr_size == prev_size:
-                    stable = True
+        try:
+            prev_size = -1
+            stable = False
+            for _ in range(6):
+                time.sleep(0.5)
+                if not path.exists():
+                    return
+                try:
+                    curr_size = path.stat().st_size
+                    if curr_size > 0 and curr_size == prev_size:
+                        stable = True
+                        break
+                    prev_size = curr_size
+                except Exception:
                     break
-                prev_size = curr_size
-            except Exception:
-                break
 
-        if stable and path.exists():
-            try:
+            if stable and path.exists():
                 size = path.stat().st_size
                 event = FileAlertEvent(
                     event_type=cat,
@@ -445,8 +452,10 @@ class _DownloadsEventHandler(FileSystemEventHandler):
                     extension=path.suffix.lower(),
                 )
                 self.callback(event)
-            except Exception as exc:
-                logger.debug("Failed to dispatch file alert for %s: %s", path, exc)
+        except Exception as exc:
+            logger.debug("Failed to dispatch file alert for %s: %s", path, exc)
+        finally:
+            threading.Timer(30.0, lambda: self._recently_handled.discard(str(path))).start()
 
     def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
@@ -555,6 +564,7 @@ class SystemResourceWatcher:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._cooldowns: Dict[int, float] = {}  # PID -> last alert timestamp
+        self._proc_cache: Dict[int, psutil.Process] = {}  # Stateful CPU tracking
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -625,30 +635,45 @@ class SystemResourceWatcher:
                             )
                             self.on_resource_alert(event)
 
-                # 2. Runaway CPU process check
+                # 2. Runaway CPU process check (stateful across iterations)
                 else:
-                    for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
+                    current_pids = set()
+                    num_cpus = psutil.cpu_count() or 1
+                    for p in psutil.process_iter(["pid", "name", "memory_info"]):
                         try:
-                            info = p.info
-                            cpu_val = float(info.get("cpu_percent") or 0.0)
-                            if cpu_val >= self.cpu_threshold_pct and p.pid not in (0, 4):
-                                pid = p.pid
+                            pid = p.pid
+                            if pid in (0, 4):
+                                continue
+                            current_pids.add(pid)
+                            if pid not in self._proc_cache:
+                                self._proc_cache[pid] = p
+                                p.cpu_percent(None)  # Initialize baseline
+                                continue
+
+                            cached_p = self._proc_cache[pid]
+                            # Normalize by CPU cores so 100% means full system saturation
+                            cpu_val = cached_p.cpu_percent(None) / num_cpus
+                            if cpu_val >= self.cpu_threshold_pct:
                                 if not self._is_cooldown_active(pid, now):
-                                    m_info = info.get("memory_info")
+                                    m_info = p.info.get("memory_info")
                                     rss_mb = round((m_info.rss if m_info else 0) / (1024 * 1024), 1)
-                                    pname = info.get("name") or f"PID {pid}"
+                                    pname = p.info.get("name") or f"PID {pid}"
                                     event = ResourceAlertEvent(
                                         alert_type="runaway_cpu",
                                         pid=pid,
                                         process_name=pname,
                                         memory_mb=rss_mb,
-                                        cpu_percent=cpu_val,
+                                        cpu_percent=round(cpu_val, 1),
                                         system_ram_percent=ram_pct,
                                     )
                                     self.on_resource_alert(event)
                                     break
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
                             continue
+
+                    # Clean up dead PIDs
+                    for dead_pid in set(self._proc_cache.keys()) - current_pids:
+                        self._proc_cache.pop(dead_pid, None)
 
             except Exception as exc:
                 logger.debug("Error in resource watcher loop: %s", exc)
@@ -796,7 +821,7 @@ class SentinelEventDaemon:
             if "fix" in clean or "haan" in clean:
                 logger.info("User requested autonomous fix for error: %s", summary)
                 # Dispatch background fix request to Makima brain API with DLP masking
-                from makima.sentinel.observer import mask_sensitive_data
+                from makima.core.guardrails import mask_sensitive_data
                 masked_trace = mask_sensitive_data(trace_info.raw_text)
                 self._dispatch_brain_task(
                     f"Copied error from {app_name}:\n{masked_trace}\n\nDiagnose root cause and provide concise fix."
@@ -915,9 +940,20 @@ class SentinelEventDaemon:
         def _on_action(action_str: str):
             clean = (action_str or "").lower()
             if "kill" in clean:
-                from makima.tools.os.processes import terminate_process
-                res = terminate_process(pid=event.pid, force=True)
-                logger.info("Terminated process PID %d: %s", event.pid, res)
+                try:
+                    # PID reuse verification: confirm process name matches before killing
+                    p = psutil.Process(event.pid)
+                    if p.name().lower() != event.process_name.lower():
+                        logger.warning(
+                            "Aborted killing PID %d: Process name changed from '%s' to '%s' (PID recycled)",
+                            event.pid, event.process_name, p.name()
+                        )
+                        return
+                    from makima.tools.os.processes import terminate_process
+                    res = terminate_process(pid=event.pid, force=True)
+                    logger.info("Terminated process PID %d (%s): %s", event.pid, event.process_name, res)
+                except psutil.NoSuchProcess:
+                    logger.info("Process PID %d (%s) already exited.", event.pid, event.process_name)
 
         self._show_toast(
             title=title,
