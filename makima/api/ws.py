@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -15,6 +15,7 @@ from makima.core.engine import HermesAgentEngine
 from makima.provider.adapters.base import ProviderResponse
 from makima.runtime import build_engine, build_registry
 from makima.tools.registry import ToolRegistry
+from makima.tools.selection import ToolExecutionGateway
 
 logger = logging.getLogger("makima.api.ws")
 router = APIRouter()
@@ -73,97 +74,6 @@ def _attachment_context(payload: Dict[str, Any]) -> str:
     return "\n\n".join(lines)
 
 
-def _infer_tool_tags(content: str, prior_messages: Optional[List[Any]] = None) -> Optional[List[str]]:
-    """
-    Infers relevant tool tags from prompt keywords and recent turn tool usage
-    to prevent tool schema attention dilution while preserving multi-turn context.
-    Falls back to None (all tools) if no specific domain is confidently identified.
-    """
-    c = (content or "").lower().strip()
-    if not c and not prior_messages:
-        return None
-
-    matched_tags: Set[str] = set()
-
-    # Check prior messages for active domain continuity (e.g. prior turn used browser, search, or files)
-    if prior_messages:
-        for prev_msg in reversed(prior_messages[-4:]):
-            if getattr(prev_msg, "tool_calls", None):
-                for tc in prev_msg.tool_calls:
-                    tc_name = getattr(tc, "name", "") or ""
-                    if any(w in tc_name for w in ("browser", "web", "fetch", "search")):
-                        matched_tags.update(["web", "browser", "fetch", "search"])
-                    elif any(w in tc_name for w in ("file", "read", "write", "document")):
-                        matched_tags.update(["filesystem", "documents", "io"])
-                    elif any(w in tc_name for w in ("media", "spotify", "playback", "volume")):
-                        matched_tags.update(["media", "music", "playback", "volume", "audio"])
-                    elif any(w in tc_name for w in ("window", "screenshot", "mouse", "keyboard", "desktop")):
-                        matched_tags.update(["desktop", "os", "apps", "windows"])
-
-    # 1. Video/anime requests need browser tools, not music-only tools.
-    # This scopes available tool schemas; the model still interprets the actual request.
-    video_terms = (
-        "anime", "episode", "episodes", "season", "seasons", "movie", "movies",
-        "film", "films", "tv show", "series", "watch", "watching", "video", "videos",
-        "trailer", "trailers", "amv", "miruro", "crunchyroll", "hidive", "aniwatch",
-        "dekh", "dekhta", "dekhna", "dikhana",
-    )
-    is_video_request = any(term in c for term in video_terms)
-    if is_video_request:
-        # Remove media tags inherited from prior turns too, so play_song is not exposed
-        # just because the preceding request was about music.
-        matched_tags.difference_update({"media", "music", "playback", "volume", "audio"})
-        matched_tags.update(["web", "browser", "fetch", "search"])
-    else:
-        # Music/audio and explicitly platform-specific playback requests.
-        if any(k in c for k in (
-            "play", "music", "song", "spotify", "youtube", "volume", "sound",
-            "track", "pause", "resume", "audio", "gaana", "sunta", "playlist",
-            "album", "artist", "singer", "listen",
-        )):
-            matched_tags.update(["media", "music", "playback", "volume", "audio", "browser", "web"])
-
-    # 2. Web Browsing / Online Search
-    if any(k in c for k in ("search", "google", "browse", "website", "url", "http", "click", "web", "fetch", "news", "price", "flipkart", "amazon", "miruro")):
-        matched_tags.update(["web", "browser", "fetch", "search"])
-
-    # 3. User Memory / Preferences / Habits
-    if any(k in c for k in ("preference", "habit", "remember", "yaad", "profile", "pasand", "hamesha", "pe dekhta", "pe sunta", "dekhta hu", "sunta hu")):
-        matched_tags.update(["memory", "facts", "preferences", "profile"])
-
-    # 4. Desktop / OS / App Window Control
-    if any(k in c for k in ("open app", "launch", "window", "screenshot", "desktop", "cursor", "click", "type", "keyboard", "mouse", "minimize", "maximize", "close app")):
-        matched_tags.update(["desktop", "os", "apps", "windows", "input", "mouse", "keyboard", "computer_use"])
-
-    # 5. Filesystem / Office Documents
-    if any(k in c for k in ("file", "read", "write", "folder", "directory", "document", "excel", "sheet", "pdf", "word", "csv", "presentation", "powerpoint")):
-        matched_tags.update(["filesystem", "documents", "excel", "word", "powerpoint", "reader", "io"])
-
-    # 6. Messaging / Comms
-    if any(k in c for k in ("whatsapp", "telegram", "discord", "email", "mail", "inbox", "send message", "contact")):
-        matched_tags.update(["messaging", "whatsapp", "telegram", "discord", "email", "inbox"])
-
-    # 7. Terminal / Code / Shell
-    if any(k in c for k in ("terminal", "command", "bash", "powershell", "cmd", "run", "execute", "python", "script", "install", "pip")):
-        matched_tags.update(["terminal", "execution", "sandbox", "filesystem", "system"])
-
-    # 8. GitHub / Git / Repositories / Code Hosting
-    if any(k in c for k in ("github", "git", "repo", "repositories", "commit", "pull request", "pr", "issue", "branch", "fork", "push", "clone", "gist")):
-        matched_tags.update(["github", "git", "developer", "repositories", "code", "mcp", "terminal", "system"])
-
-    # 9. MCP Plugins / Marketplace Extensions
-    if any(k in c for k in ("mcp", "plugin", "extension", "marketplace", "sqlite", "database")):
-        matched_tags.update(["plugin", "mcp", "openapi", "database", "sqlite"])
-
-    if matched_tags:
-        # Always inject fundamental core capabilities (memory facts + profile + web search) alongside domain tools
-        matched_tags.update(["memory", "facts", "preferences", "web", "search"])
-        return sorted(matched_tags)
-
-    # Safe bounded fallback for general conversation — prevents exceeding free model token limits (e.g. Groq 8000 TPM)
-    return sorted(["memory", "facts", "preferences", "web", "search", "media"])
-
-
 @router.websocket("/ws")
 async def websocket_bridge(websocket: WebSocket) -> None:
     """Serve the Makima event stream without blocking the receive loop."""
@@ -175,6 +85,10 @@ async def websocket_bridge(websocket: WebSocket) -> None:
     await websocket.accept()
     engine: Optional[HermesAgentEngine] = getattr(websocket.app.state, "engine", None)
     registry: ToolRegistry = getattr(websocket.app.state, "registry", None) or build_registry()
+    execution_gateway = ToolExecutionGateway(
+        registry,
+        lambda: getattr(websocket.app.state, "disabled_tools", set()),
+    )
     session_store = getattr(websocket.app.state, "session_store", None)
     running: Dict[str, asyncio.Task[Any]] = {}
     send_lock = asyncio.Lock()
@@ -343,13 +257,10 @@ async def websocket_bridge(websocket: WebSocket) -> None:
 
             await send({"type": "tool_call", "id": call_id, "name": name, "arguments": args}, current_task_id)
             await send({"type": "status", "stage": stage_display, "tool": name}, current_task_id)
-            if name in getattr(websocket.app.state, "disabled_tools", set()):
-                result: Any = f"[TOOL_DISABLED: {name}] Tool disabled in Makima settings."
-            else:
-                try:
-                    result = await registry.execute(name, args)
-                except Exception as err:
-                    result = f"[TOOL_FAILED: {name}] {type(err).__name__}: {str(err)}"
+            try:
+                result: Any = await execution_gateway.execute(name, args)
+            except Exception as err:
+                result = f"[TOOL_FAILED: {name}] {type(err).__name__}: {str(err)}"
             try:
                 executed_tool_trace.append(_format_tool_trace_entry(name, args or {}, result))
             except Exception:
@@ -410,15 +321,11 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                     resolved_temp = float(ui_cfg.get("temperature", 0.2))
                 except (ValueError, TypeError):
                     resolved_temp = 0.2
-            inferred_tags = _infer_tool_tags(content, prior_messages=session_messages)
-            if inferred_tags is not None and registry is not None:
-                if len(registry.list_tools(tags=inferred_tags)) < 5:
-                    inferred_tags = None
             result = await engine.run(
                 prompt=content,
                 messages=session_messages,
                 system_prompt=payload.get("system_prompt"),
-                tools=registry,
+                tools=execution_gateway,
                 tool_executor=ws_tool_executor,
                 task=payload.get("task", "fast_chat"),
                 temperature=resolved_temp,
@@ -426,7 +333,6 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                 preferred_backend=payload.get("backend") or payload.get("provider"),
                 on_turn_end=on_turn_end,
                 session_id=current_session_id or None,
-                tool_tags=inferred_tags,
                 thinking_mode=thinking_mode,
             )
             await send({
