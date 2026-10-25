@@ -896,10 +896,14 @@ async def close_browser_controller() -> None:
 @tool(
     name="browser_interact",
     description=(
-        "Interactive GUI Chromium browser controller using Playwright. "
-        "Use when you need to visibly open a browser window on screen, interact with e-commerce sites "
-        "(Amazon/Flipkart live price verification when HTTP fetch_page is blocked, opening product pages, clicking 'Add to Cart'), "
-        "click buttons, type into forms, or interact with web apps (Spotify, YouTube, WhatsApp)."
+        "Visible interactive browser for navigating websites and working with page content, controls, and forms. "
+        "Use for requests to find or watch online anime episodes, TV series, movies, AMVs, trailers, or other videos: "
+        "open the site the user explicitly names or has saved as their preferred streaming site, search the requested "
+        "title, inspect results, select the requested episode, and interact with playback controls as needed. "
+        "For video viewing, use this tool instead of play_song. Honor an explicit website first, then the user's "
+        "saved preference (for example, Miruro if that is the remembered preference); never default anime/video "
+        "requests to YouTube unless YouTube is explicitly requested. Also use for visible browser navigation, "
+        "web apps, buttons, links, search fields, forms, and multi-step website interactions."
     ),
     tags=["web", "browser", "automation", "interactive", "sota"],
 )
@@ -916,7 +920,10 @@ async def browser_interact(
     max_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Executes an action in the persistent Playwright Chromium browser.
+    Executes an action in the persistent Playwright Chromium browser. For online anime, episodes, movies,
+    series, or other video requests, navigate to the user's explicit or saved preferred streaming site,
+    inspect the page, search for the requested title, and select the relevant result/episode. Use this tool
+    instead of play_song for online video viewing. Navigation alone does not prove that playback started.
 
     Args:
         action: The action to execute. Must be one of:
