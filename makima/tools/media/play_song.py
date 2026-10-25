@@ -278,6 +278,26 @@ def _play_local_media(path_or_query: str, auto_open: bool) -> dict[str, Any]:
         "general website navigation, or unrelated operating-system actions."
     ),
     tags=["media", "music", "audio", "playback"],
+    purpose="Start music/audio playback or resolve an audio track on a supported platform.",
+    capabilities=[
+        "Search for a song, artist, album, or playlist on a supported music service.",
+        "Open an explicitly provided local media file with the system media player.",
+    ],
+    use_when=[
+        "The intended target is music/audio playback or a named audio track.",
+        "The user explicitly supplies a local media file to open.",
+    ],
+    avoid_when=[
+        "The user intends to close, launch, focus, or otherwise control a desktop application.",
+        "The user intends to pause or stop an existing Windows media session without choosing new content.",
+        "The user intends to navigate or interact with a website rather than start a music search.",
+    ],
+    examples=[
+        "Play a named song by a named artist.",
+        "Search a music service for an album or playlist.",
+        "Open an explicitly supplied local media file.",
+    ],
+    side_effect="Starts playback or opens a service/application; does not close an existing app.",
 )
 def play_song(
     query: str,
