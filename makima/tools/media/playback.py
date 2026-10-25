@@ -43,8 +43,28 @@ async def _get_active_session(
 
 @tool(
     name="control_media",
-    description="Controls media playback (play, pause, play_pause, next, previous, stop) on Windows via WinRT.",
+    description="Controls the active Windows media-session transport.",
     tags=["media", "playback", "windows"],
+    purpose="Control playback state of an active Windows media session.",
+    capabilities=[
+        "Play, pause, toggle, stop, skip to next, or return to previous media.",
+        "Report the active media session and its available playback state.",
+    ],
+    use_when=[
+        "The requested target is playback state for the current Windows media session.",
+        "The user asks to pause/resume/stop currently active media without selecting new content.",
+    ],
+    avoid_when=[
+        "The user intends to close or launch an application.",
+        "The user intends to close a particular browser tab or window.",
+        "The user asks to search for and start a different song rather than control the current session.",
+    ],
+    examples=[
+        "Pause the currently active media session.",
+        "Resume the current media session.",
+        "Stop playback without closing the media application.",
+    ],
+    side_effect="Changes active playback state; does not terminate the media application.",
 )
 async def control_media(action: str) -> Dict[str, Any]:
     """
