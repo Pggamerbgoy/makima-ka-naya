@@ -896,14 +896,11 @@ async def close_browser_controller() -> None:
 @tool(
     name="browser_interact",
     description=(
-        "Visible interactive browser for navigating websites and working with page content, controls, and forms. "
-        "Use for requests to find or watch online anime episodes, TV series, movies, AMVs, trailers, or other videos: "
-        "open the site the user explicitly names or has saved as their preferred streaming site, search the requested "
-        "title, inspect results, select the requested episode, and interact with playback controls as needed. "
-        "For video viewing, use this tool instead of play_song. Honor an explicit website first, then the user's "
-        "saved preference (for example, Miruro if that is the remembered preference); never default anime/video "
-        "requests to YouTube unless YouTube is explicitly requested. Also use for visible browser navigation, "
-        "web apps, buttons, links, search fields, forms, and multi-step website interactions."
+        "Visible interactive browser controller for website navigation and browser-based interactions. "
+        "Use when a task requires opening a page, inspecting its content, searching within a website, "
+        "clicking links or controls, completing forms, interacting with web apps, or carrying out a sequence "
+        "of page actions. Choose this tool when the intended target is a website/browser rather than a native "
+        "application, operating-system setting, or media-session control."
     ),
     tags=["web", "browser", "automation", "interactive", "sota"],
 )
@@ -920,10 +917,9 @@ async def browser_interact(
     max_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Executes an action in the persistent Playwright Chromium browser. For online anime, episodes, movies,
-    series, or other video requests, navigate to the user's explicit or saved preferred streaming site,
-    inspect the page, search for the requested title, and select the relevant result/episode. Use this tool
-    instead of play_song for online video viewing. Navigation alone does not prove that playback started.
+    Executes an action in the persistent Playwright Chromium browser. Read the current page state and each
+    action result before deciding on the next step. A successful navigation means the page opened; it does
+    not by itself prove that a specific task on the page has completed.
 
     Args:
         action: The action to execute. Must be one of:
