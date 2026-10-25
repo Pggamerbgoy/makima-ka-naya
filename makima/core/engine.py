@@ -695,7 +695,18 @@ class HermesAgentEngine:
                     if user_text:
                         q_low = user_text.lower()
                         needs_messaging = any(k in q_low for k in ("whatsapp", "telegram", "discord", "email", "mail", "inbox", "message", "send", "bhej", "dm", "chat"))
-                        needs_media = any(k in q_low for k in ("spotify", "music", "song", "gaana", "volume", "sound", "play", "pause", "track", "audio"))
+                        # "Play" alone is ambiguous: video/anime requests must not keep the music-only tool.
+                        video_terms = (
+                            "anime", "episode", "episodes", "season", "seasons", "movie", "movies",
+                            "film", "films", "tv show", "series", "watch", "watching", "video", "videos",
+                            "trailer", "trailers", "amv", "miruro", "crunchyroll", "hidive", "aniwatch",
+                            "dekh", "dekhta", "dekhna", "dikhana",
+                        )
+                        needs_video = any(term in q_low for term in video_terms)
+                        needs_media = (not needs_video) and any(
+                            k in q_low
+                            for k in ("spotify", "music", "song", "gaana", "volume", "sound", "play", "pause", "track", "audio")
+                        )
                         
                         filtered_schemas = []
                         for s in tool_schemas:
