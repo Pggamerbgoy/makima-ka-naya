@@ -180,10 +180,19 @@ class ConcurrencyToolsConfig(BaseModel):
     ])
 
 
+class ToolSelectionConfig(BaseModel):
+    enabled: bool = True
+    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    max_candidates: int = Field(default=32, ge=1)
+    minimum_candidates: int = Field(default=16, ge=1)
+    minimum_similarity: float = Field(default=0.20, ge=-1.0, le=1.0)
+
+
 class ToolsConfig(BaseModel):
     sandbox: SandboxToolsConfig = Field(default_factory=SandboxToolsConfig)
     browser: BrowserToolsConfig = Field(default_factory=BrowserToolsConfig)
     concurrency: ConcurrencyToolsConfig = Field(default_factory=ConcurrencyToolsConfig)
+    selection: ToolSelectionConfig = Field(default_factory=ToolSelectionConfig)
 
 
 class SoundDeviceVoiceConfig(BaseModel):
