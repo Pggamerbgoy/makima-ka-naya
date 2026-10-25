@@ -163,39 +163,57 @@ class HermesAgentEngine:
 
     @staticmethod
     def _tool_selection_context(prompt: Optional[str], messages: List[Message]) -> str:
-        """Build semantic retrieval context from recent requests, actions, and tool outcomes."""
+        """Build current-request-first retrieval context for bounded embedding models."""
+        current_request = (prompt or "").strip()
+        if not current_request:
+            current_request = next(
+                ((message.content or "").strip() for message in reversed(messages) if message.role == "user" and (message.content or "").strip()),
+                "",
+            )
+
         parts: List[str] = []
-        for message in messages[-20:]:
+        if current_request:
+            parts.append(f"Current user request: {current_request[:700]}")
+
+        # Recent actions and outcomes follow the current request, not precede it.
+        # This makes the latest correction more likely to survive embedding token limits.
+        seen_current = False
+        recent = list(reversed(messages[-12:]))
+        for message in recent:
             role = message.role
             if role not in {"user", "assistant", "tool"}:
                 continue
 
             content = (message.content or "").strip()
             if role == "user" and content:
-                parts.append(f"User request: {content[:2500]}")
+                if not seen_current and current_request and content == current_request:
+                    seen_current = True
+                    continue
+                parts.append(f"Recent user context: {content[:260]}")
             elif role == "assistant":
                 if content:
-                    parts.append(f"Assistant response: {content[:1800]}")
+                    parts.append(f"Recent assistant response: {content[:220]}")
                 for call in getattr(message, "tool_calls", None) or []:
                     call_name = getattr(call, "name", "") or ""
                     call_arguments = getattr(call, "arguments", {}) or {}
                     if call_name:
                         parts.append(
-                            "Assistant structured action: "
+                            "Recent structured action: "
                             + json.dumps(
                                 {"tool": call_name, "arguments": call_arguments},
                                 ensure_ascii=False,
                                 default=str,
-                            )[:1200]
+                            )[:320]
                         )
             elif role == "tool" and content:
                 tool_name = getattr(message, "name", None) or "tool"
-                parts.append(f"Observed tool result ({tool_name}): {content[:1400]}")
+                parts.append(f"Recent observed result ({tool_name}): {content[:320]}")
+
+            if sum(len(part) for part in parts) >= 2400:
+                break
 
         context = "\n".join(parts)
-        if prompt and prompt.strip() and prompt.strip() not in context:
-            context = f"{context}\nCurrent request: {prompt.strip()}" if context else prompt.strip()
-        return context[-16000:]
+        return context[:3000]
 
     async def _execute_tool_call(
         self,
