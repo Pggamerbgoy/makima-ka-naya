@@ -163,19 +163,39 @@ class HermesAgentEngine:
 
     @staticmethod
     def _tool_selection_context(prompt: Optional[str], messages: List[Message]) -> str:
-        """Build semantic-search context from recent conversational turns."""
+        """Build semantic retrieval context from recent requests, actions, and tool outcomes."""
         parts: List[str] = []
-        for message in messages[-12:]:
-            if message.role not in {"user", "assistant"}:
+        for message in messages[-20:]:
+            role = message.role
+            if role not in {"user", "assistant", "tool"}:
                 continue
+
             content = (message.content or "").strip()
-            if content:
-                role = "User" if message.role == "user" else "Assistant"
-                parts.append(f"{role}: {content}")
+            if role == "user" and content:
+                parts.append(f"User request: {content[:2500]}")
+            elif role == "assistant":
+                if content:
+                    parts.append(f"Assistant response: {content[:1800]}")
+                for call in getattr(message, "tool_calls", None) or []:
+                    call_name = getattr(call, "name", "") or ""
+                    call_arguments = getattr(call, "arguments", {}) or {}
+                    if call_name:
+                        parts.append(
+                            "Assistant structured action: "
+                            + json.dumps(
+                                {"tool": call_name, "arguments": call_arguments},
+                                ensure_ascii=False,
+                                default=str,
+                            )[:1200]
+                        )
+            elif role == "tool" and content:
+                tool_name = getattr(message, "name", None) or "tool"
+                parts.append(f"Observed tool result ({tool_name}): {content[:1400]}")
+
         context = "\n".join(parts)
         if prompt and prompt.strip() and prompt.strip() not in context:
             context = f"{context}\nCurrent request: {prompt.strip()}" if context else prompt.strip()
-        return context[-12000:]
+        return context[-16000:]
 
     async def _execute_tool_call(
         self,
