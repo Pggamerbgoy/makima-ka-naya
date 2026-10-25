@@ -15,6 +15,8 @@ import math
 import threading
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set
 
+from makima.core.guardrails import DangerousCommandError, Guardrails
+
 logger = logging.getLogger(__name__)
 
 TOOL_SELECTION_GUIDANCE = """
@@ -209,9 +211,11 @@ class ToolExecutionGateway:
         self,
         registry: Any,
         disabled_tools: Optional[Callable[[], Iterable[str]] | Iterable[str]] = None,
+        guardrails: Optional[Guardrails] = None,
     ) -> None:
         self.registry = registry
         self._disabled_tools = disabled_tools
+        self.guardrails = guardrails or Guardrails()
 
     def _disabled_names(self) -> Set[str]:
         value = self._disabled_tools() if callable(self._disabled_tools) else self._disabled_tools
@@ -256,4 +260,9 @@ class ToolExecutionGateway:
             return f"[TOOL_DISABLED: {name}] Tool disabled in Makima settings."
         if name not in set(self.registry.list_names()):
             return f"[TOOL_NOT_FOUND: {name}] Tool is not registered."
+        try:
+            self.guardrails.validate_tool_call(name, arguments or {})
+        except DangerousCommandError as exc:
+            logger.warning("Shared execution gateway blocked tool '%s': %s", name, exc)
+            return f"[GUARDRAIL_BLOCKED: {name}] {exc}"
         return await self.registry.execute(name, arguments or {})
