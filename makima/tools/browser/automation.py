@@ -903,6 +903,27 @@ async def close_browser_controller() -> None:
         "application, operating-system setting, or media-session control."
     ),
     tags=["web", "browser", "automation", "interactive", "sota"],
+    purpose="Operate the active browser and interact with websites.",
+    capabilities=[
+        "Navigate to a URL and inspect the current page.",
+        "Read interactive elements and visible page content.",
+        "Click controls, follow links, enter text, and submit forms.",
+    ],
+    use_when=[
+        "The intended target is a web page, website, or browser tab.",
+        "The task requires visible browser interaction or a multi-step website workflow.",
+    ],
+    avoid_when=[
+        "The requested target is a native desktop application's process lifecycle.",
+        "The user wants to change the system's active Windows media session without interacting with a website.",
+        "The requested operation can be completed through a more direct native application-control tool.",
+    ],
+    examples=[
+        "Open a website and search within it.",
+        "Interact with a form on the current page.",
+        "Navigate to a page and verify what is displayed.",
+    ],
+    side_effect="Navigates and interacts with the current browser session; it does not terminate native applications.",
 )
 async def browser_interact(
     action: str,
