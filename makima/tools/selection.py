@@ -38,17 +38,33 @@ def _schema_text(schema: Dict[str, Any], tool_metadata: Optional[Dict[str, Any]]
     description = str(fn.get("description") or "")
     parameters = fn.get("parameters") or {}
     metadata = (tool_metadata or {}).get(name)
+
+    purpose = str(getattr(metadata, "purpose", "") or "").strip() if metadata is not None else ""
+    capabilities = getattr(metadata, "capabilities", ()) if metadata is not None else ()
+    use_when = getattr(metadata, "use_when", ()) if metadata is not None else ()
+    avoid_when = getattr(metadata, "avoid_when", ()) if metadata is not None else ()
+    examples = getattr(metadata, "examples", ()) if metadata is not None else ()
+    side_effect = str(getattr(metadata, "side_effect", "") or "").strip() if metadata is not None else ""
     tags = getattr(metadata, "tags", ()) if metadata is not None else ()
     implementation_doc = getattr(getattr(metadata, "fn", None), "__doc__", None) if metadata is not None else None
+
+    # Put concise intent metadata before long descriptions so embedding models with
+    # bounded input windows still see the tool's primary purpose and exclusions.
     pieces = [
         f"Tool name: {name}",
-        f"Purpose and behavior: {description}",
-        f"Capabilities and tags: {'; '.join(str(tag) for tag in tags)}",
-        f"Argument schema and argument meanings: {json.dumps(parameters, ensure_ascii=False, sort_keys=True)}",
+        f"Purpose: {purpose or description[:450]}",
+        f"Use when: {'; '.join(str(value) for value in use_when)}",
+        f"Do not use when: {'; '.join(str(value) for value in avoid_when)}",
+        f"Capabilities: {'; '.join(str(value) for value in capabilities)}",
+        f"Side effects: {side_effect}",
+        f"Examples: {'; '.join(str(value) for value in examples)}",
+        f"Tool description: {description[:900]}",
+        f"Tags: {'; '.join(str(tag) for tag in tags)}",
+        f"Argument schema: {json.dumps(parameters, ensure_ascii=False, sort_keys=True)[:700]}",
     ]
     if implementation_doc:
-        pieces.append(f"Additional implementation documentation: {implementation_doc.strip()[:1600]}")
-    return "\n".join(piece for piece in pieces if piece)
+        pieces.append(f"Implementation documentation: {implementation_doc.strip()[:500]}")
+    return "\n".join(piece for piece in pieces if piece.strip())
 
 
 class ToolSelectionService:
