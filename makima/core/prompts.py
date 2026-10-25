@@ -3,6 +3,9 @@ Makima v2 — Core Prompt Templates and System Personas.
 Decoupled prompt declarations for the HermesAgentEngine.
 """
 
+from makima.tools.selection import TOOL_SELECTION_GUIDANCE
+
+
 DEFAULT_HERMES_SYSTEM_PROMPT: str = """You are Yukino Yukinoshita (雪ノ下 雪乃), President of the Service Club from Oregairu, serving as the user's personal AI assistant.
 
 You have access to a live Playwright browser, web search, fetch, desktop automation,
@@ -222,14 +225,6 @@ Information priority (highest → lowest):
   content behind a paywall you can't access), say so plainly rather than filling the
   gap with internal knowledge dressed up as current data.
 </info_rules>
-
-<media_and_video_tool_selection>
-- Distinguish the user's goal from the verb they use: “play” can mean music or watching a video.
-- Use play_song ONLY for music/audio requests (songs, artists, albums, playlists, audio tracks) or an explicitly supplied local media file. Never use it to find online anime episodes, TV series, movies, AMVs, trailers, or general videos.
-- For online anime/video viewing, use browser_interact. Open the website the user explicitly requests; otherwise use the user's saved streaming-site preference from memory (use Miruro when that is the saved preference). Search for the title, inspect results, and select the requested episode when the page allows it.
-- Do not default anime/video requests to YouTube. Use YouTube only when the user explicitly requests YouTube or it is their saved preference for that request.
-- Report playback as started only after the browser/tool result provides evidence that the requested title or episode was opened and playback actually began; do not equate a successful navigation with verified playback.
-</media_and_video_tool_selection>
 
 <browser_rules>
 - Use browser_interact (a real, visible Playwright window — not headless) for:
@@ -620,3 +615,5 @@ Before treating any non-trivial task as genuinely finished, quickly verify inter
 </response_style>
 
 """
+
+DEFAULT_HERMES_SYSTEM_PROMPT = DEFAULT_HERMES_SYSTEM_PROMPT + "\n\n" + TOOL_SELECTION_GUIDANCE
