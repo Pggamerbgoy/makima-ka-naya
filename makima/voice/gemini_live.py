@@ -15,7 +15,8 @@ from google.genai import types
 
 from makima.config import get_settings
 from makima.tools.registry import get_registry
-from makima.tools.selection import TOOL_SELECTION_GUIDANCE, ToolExecutionGateway
+from makima.core.tool_selection_policy import TOOL_SELECTION_GUIDANCE
+from makima.tools.selection import ToolExecutionGateway
 
 logger = logging.getLogger(__name__)
 
