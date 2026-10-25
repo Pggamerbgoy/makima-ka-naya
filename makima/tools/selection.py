@@ -53,7 +53,7 @@ def _schema_text(schema: Dict[str, Any], tool_metadata: Optional[Dict[str, Any]]
         f"Argument schema and argument meanings: {json.dumps(parameters, ensure_ascii=False, sort_keys=True)}",
     ]
     if implementation_doc:
-        pieces.append(f"Additional implementation documentation: {implementation_doc.strip()}")
+        pieces.append(f"Additional implementation documentation: {implementation_doc.strip()[:1600]}")
     return "\n".join(piece for piece in pieces if piece)
 
 
@@ -82,23 +82,13 @@ class ToolSelectionService:
 
     @staticmethod
     def _load_config() -> Any:
+        from makima.config import ToolSelectionConfig, get_settings
+
         try:
-            from makima.config import get_settings, ToolSelectionConfig
-
             return get_settings().tools.selection
-        except Exception:
-            try:
-                from makima.config import ToolSelectionConfig
-
-                return ToolSelectionConfig()
-            except Exception:
-                class Defaults:
-                    enabled = True
-                    embedding_model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-                    max_candidates = 32
-                    minimum_candidates = 16
-                    minimum_similarity = 0.20
-                return Defaults()
+        except Exception as exc:
+            logger.warning("Could not load tool-selection settings; using the configured model defaults: %s", exc)
+            return ToolSelectionConfig()
 
     @classmethod
     def from_settings(cls) -> "ToolSelectionService":
