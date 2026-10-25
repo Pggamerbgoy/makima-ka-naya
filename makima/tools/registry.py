@@ -367,6 +367,37 @@ class Tool:
     has_kwargs: bool = False
     is_async: bool = False
     parallel_safe: bool = False
+    purpose: str = ""
+    capabilities: List[str] = field(default_factory=list)
+    use_when: List[str] = field(default_factory=list)
+    avoid_when: List[str] = field(default_factory=list)
+    examples: List[str] = field(default_factory=list)
+    side_effect: str = ""
+
+    @property
+    def selection_guidance(self) -> str:
+        """Natural-language usage metadata consumed by schema and retrieval layers."""
+        sections = []
+        for label, values in (
+            ("Purpose", [self.purpose] if self.purpose else []),
+            ("Capabilities", self.capabilities),
+            ("Use when", self.use_when),
+            ("Do not use when", self.avoid_when),
+            ("Examples", self.examples),
+            ("Side effects", [self.side_effect] if self.side_effect else []),
+        ):
+            cleaned = [str(value).strip() for value in values if str(value).strip()]
+            if cleaned:
+                sections.append(f"{label}: " + "; ".join(cleaned))
+        return "\\n".join(sections)
+
+    @property
+    def model_description(self) -> str:
+        """Complete description shown to the LLM without changing the canonical base description."""
+        guidance = self.selection_guidance
+        if not guidance:
+            return self.description
+        return f"{self.description}\\n\\n{guidance}"
 
     @classmethod
     def from_function(
@@ -378,6 +409,12 @@ class Tool:
         parallel_safe: Optional[bool] = None,
         safe_tags: Optional[Set[str]] = None,
         mutating_tags: Optional[Set[str]] = None,
+        purpose: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        use_when: Optional[List[str]] = None,
+        avoid_when: Optional[List[str]] = None,
+        examples: Optional[List[str]] = None,
+        side_effect: Optional[str] = None,
     ) -> "Tool":
         """Builds a Tool instance by introspecting a function."""
         tool_name = name or getattr(fn, "__name__", "unnamed_tool")
@@ -408,13 +445,19 @@ class Tool:
             has_kwargs=has_kw,
             is_async=is_coroutine,
             parallel_safe=safe,
+            purpose=purpose or "",
+            capabilities=list(capabilities or []),
+            use_when=list(use_when or []),
+            avoid_when=list(avoid_when or []),
+            examples=list(examples or []),
+            side_effect=side_effect or "",
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns standard OpenAI-compatible tool declaration."""
         fn_decl: Dict[str, Any] = {
             "name": self.name,
-            "description": self.description,
+            "description": self.model_description,
             "parameters": self.parameters_schema,
         }
         if not self.has_kwargs:
@@ -428,7 +471,7 @@ class Tool:
         """Returns Gemini FunctionDeclaration-compatible dict."""
         return {
             "name": self.name,
-            "description": self.description,
+            "description": self.model_description,
             "parameters": self.parameters_schema,
         }
 
@@ -495,6 +538,12 @@ class ToolRegistry:
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
         parallel_safe: Optional[bool] = None,
+        purpose: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        use_when: Optional[List[str]] = None,
+        avoid_when: Optional[List[str]] = None,
+        examples: Optional[List[str]] = None,
+        side_effect: Optional[str] = None,
     ) -> Tool:
         """
         Registers a function or Tool object into this registry.
@@ -513,6 +562,12 @@ class ToolRegistry:
             parallel_safe=parallel_safe,
             safe_tags=self._safe_tags,
             mutating_tags=self._mutating_tags,
+            purpose=purpose,
+            capabilities=capabilities,
+            use_when=use_when,
+            avoid_when=avoid_when,
+            examples=examples,
+            side_effect=side_effect,
         )
         return self.register_tool(tool_obj)
 
@@ -586,6 +641,12 @@ class ToolRegistry:
         description: Optional[str] = None,
         tags: Optional[List[str]] = None,
         parallel_safe: Optional[bool] = None,
+        purpose: Optional[str] = None,
+        capabilities: Optional[List[str]] = None,
+        use_when: Optional[List[str]] = None,
+        avoid_when: Optional[List[str]] = None,
+        examples: Optional[List[str]] = None,
+        side_effect: Optional[str] = None,
     ) -> Callable:
         """Decorator to register a tool directly on this registry instance."""
         def decorator(fn: Callable) -> Callable:
@@ -597,6 +658,12 @@ class ToolRegistry:
                 description=actual_desc,
                 tags=tags,
                 parallel_safe=parallel_safe,
+                purpose=purpose,
+                capabilities=capabilities,
+                use_when=use_when,
+                avoid_when=avoid_when,
+                examples=examples,
+                side_effect=side_effect,
             )
             setattr(fn, "__makima_tool__", True)
             setattr(fn, "__tool_name__", tool_obj.name)
@@ -886,6 +953,12 @@ def tool(
     description: Optional[str] = None,
     tags: Optional[List[str]] = None,
     parallel_safe: Optional[bool] = None,
+    purpose: Optional[str] = None,
+    capabilities: Optional[List[str]] = None,
+    use_when: Optional[List[str]] = None,
+    avoid_when: Optional[List[str]] = None,
+    examples: Optional[List[str]] = None,
+    side_effect: Optional[str] = None,
 ) -> Callable:
     """
     Primary @tool decorator.
@@ -907,6 +980,12 @@ def tool(
             description=actual_desc,
             tags=actual_tags,
             parallel_safe=parallel_safe,
+            purpose=purpose,
+            capabilities=capabilities,
+            use_when=use_when,
+            avoid_when=avoid_when,
+            examples=examples,
+            side_effect=side_effect,
         )
 
         setattr(fn, "__makima_tool__", True)
