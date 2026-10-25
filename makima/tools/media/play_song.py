@@ -272,12 +272,10 @@ def _play_local_media(path_or_query: str, auto_open: bool) -> dict[str, Any]:
 @tool(
     name="play_song",
     description=(
-        "Music/audio playback tool for songs, artists, albums, playlists, and audio tracks. "
-        "Use ONLY when the user wants to listen to music or explicitly open a local media file. "
-        "Do NOT use for online anime episodes, TV series, movies, AMVs, trailers, or ordinary video viewing. "
-        "For online video requests, use browser_interact to open the explicitly requested or saved preferred "
-        "streaming site, then search for and select the requested title. The default platform 'youtube' "
-        "applies to music requests only; it is NOT a default website for anime or other videos."
+        "Music and audio playback for songs, artists, albums, playlists, audio searches, and explicitly "
+        "supplied local media files. Use this tool when the user's intended target is audio/media playback "
+        "on a supported service or a local file; do not use it as a substitute for application control, "
+        "general website navigation, or unrelated operating-system actions."
     ),
     tags=["media", "music", "audio", "playback"],
 )
@@ -288,9 +286,8 @@ def play_song(
     browser: str | None = None,
 ) -> dict[str, Any]:
     """
-    Search for and play music/audio on a supported service, or open an explicitly supplied local media file.
-    This tool is not for searching or watching online anime episodes, TV series, movies, AMVs, trailers,
-    or general video content; use the browser tool for those requests.
+    Search for music/audio on a supported service, or open an explicitly supplied local media file.
+    Select this tool based on the requested target and the supported media operations.
 
     Args:
         query: Song/artist/album/playlist/audio query, or an explicit local media file path.
