@@ -389,7 +389,7 @@ class Tool:
             cleaned = [str(value).strip() for value in values if str(value).strip()]
             if cleaned:
                 sections.append(f"{label}: " + "; ".join(cleaned))
-        return "\\n".join(sections)
+        return "\n".join(sections)
 
     @property
     def model_description(self) -> str:
@@ -397,7 +397,7 @@ class Tool:
         guidance = self.selection_guidance
         if not guidance:
             return self.description
-        return f"{self.description}\\n\\n{guidance}"
+        return f"{self.description}\n\n{guidance}"
 
     @classmethod
     def from_function(
