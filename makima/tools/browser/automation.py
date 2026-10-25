@@ -896,12 +896,34 @@ async def close_browser_controller() -> None:
 @tool(
     name="browser_interact",
     description=(
-        "Interactive GUI Chromium browser controller using Playwright. "
-        "Use when you need to visibly open a browser window on screen, interact with e-commerce sites "
-        "(Amazon/Flipkart live price verification when HTTP fetch_page is blocked, opening product pages, clicking 'Add to Cart'), "
-        "click buttons, type into forms, or interact with web apps (Spotify, YouTube, WhatsApp)."
+        "Visible interactive browser controller for website navigation and browser-based interactions. "
+        "Use when a task requires opening a page, inspecting its content, searching within a website, "
+        "clicking links or controls, completing forms, interacting with web apps, or carrying out a sequence "
+        "of page actions. Choose this tool when the intended target is a website/browser rather than a native "
+        "application, operating-system setting, or media-session control."
     ),
     tags=["web", "browser", "automation", "interactive", "sota"],
+    purpose="Operate the active browser and interact with websites.",
+    capabilities=[
+        "Navigate to a URL and inspect the current page.",
+        "Read interactive elements and visible page content.",
+        "Click controls, follow links, enter text, and submit forms.",
+    ],
+    use_when=[
+        "The intended target is a web page, website, or browser tab.",
+        "The task requires visible browser interaction or a multi-step website workflow.",
+    ],
+    avoid_when=[
+        "The requested target is a native desktop application's process lifecycle.",
+        "The user wants to change the system's active Windows media session without interacting with a website.",
+        "The requested operation can be completed through a more direct native application-control tool.",
+    ],
+    examples=[
+        "Open a website and search within it.",
+        "Interact with a form on the current page.",
+        "Navigate to a page and verify what is displayed.",
+    ],
+    side_effect="Navigates and interacts with the current browser session; it does not terminate native applications.",
 )
 async def browser_interact(
     action: str,
@@ -916,7 +938,9 @@ async def browser_interact(
     max_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Executes an action in the persistent Playwright Chromium browser.
+    Executes an action in the persistent Playwright Chromium browser. Read the current page state and each
+    action result before deciding on the next step. A successful navigation means the page opened; it does
+    not by itself prove that a specific task on the page has completed.
 
     Args:
         action: The action to execute. Must be one of:

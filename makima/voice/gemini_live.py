@@ -15,6 +15,8 @@ from google.genai import types
 
 from makima.config import get_settings
 from makima.tools.registry import get_registry
+from makima.core.tool_selection_policy import TOOL_SELECTION_GUIDANCE
+from makima.tools.selection import ToolExecutionGateway
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,7 @@ DEFAULT_VOICE_SYSTEM_INSTRUCTION = (
     "proactively invoke the appropriate tool or speak a brief 1-sentence helpful update.\n"
     "3. If the event is irrelevant, casual chat, or non-actionable, REMAIN COMPLETELY SILENT (produce no output and call no tools).\n"
     "4. Spoken updates must be natural, brief, and never recite long codes or file paths aloud."
-)
+) + "\n\n" + TOOL_SELECTION_GUIDANCE
 
 
 class GeminiLiveSession:
@@ -93,12 +95,15 @@ class GeminiLiveSession:
         model: Optional[str] = None,
         voice_name: Optional[str] = None,
         system_instruction: Optional[str] = None,
+        execution_gateway: Optional[ToolExecutionGateway] = None,
     ) -> None:
         self.settings = get_settings()
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or getattr(self.settings, "gemini_api_key", None)
         self.model = model or get_live_model()
         self.voice_name = voice_name or get_voice_name()
         self.system_instruction = system_instruction
+        self.execution_gateway = execution_gateway
+        self._available_tool_names: set[str] = set()
         self._client: Optional[genai.Client] = None
         self._session: Optional[Any] = None
         self._is_active = False
@@ -116,10 +121,17 @@ class GeminiLiveSession:
 
     def _build_live_config(self) -> types.LiveConnectConfig:
         """Constructs LiveConnectConfig with audio modality, prompt, and registered tools."""
-        # Convert Makima ToolRegistry tools to Gemini function declarations
-        reg = get_registry()
+        # Use the same enabled-tool gateway as chat and WebSocket execution.
+        if self.execution_gateway is None:
+            self.execution_gateway = ToolExecutionGateway(get_registry())
+        reg = self.execution_gateway.registry
         reg.discover()
-        schemas = reg.get_schemas()
+        schemas = self.execution_gateway.get_schemas(format="openai")
+        self._available_tool_names = {
+            str(s.get("function", {}).get("name"))
+            for s in schemas
+            if isinstance(s.get("function"), dict) and s.get("function", {}).get("name")
+        }
 
         function_declarations = []
         for s in schemas:
@@ -252,8 +264,15 @@ class GeminiLiveSession:
                         "call_id": getattr(fc, "id", None),
                     }
 
-                    # Execute tool via ToolRegistry
-                    result = await reg.execute(fn_name, fn_args)
+                    # Validate against the session schemas and shared execution policy.
+                    if self.execution_gateway is None:
+                        result = f"[TOOL_FAILED: {fn_name}] Tool execution gateway is unavailable."
+                    else:
+                        result = await self.execution_gateway.execute(
+                            fn_name,
+                            fn_args,
+                            allowed_tool_names=self._available_tool_names,
+                        )
                     yield {
                         "type": "tool_result",
                         "name": fn_name,

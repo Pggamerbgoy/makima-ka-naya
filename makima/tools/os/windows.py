@@ -215,6 +215,22 @@ def list_open_windows() -> List[Dict[str, Any]]:
     name="focus_window",
     description="Bring a target window into the foreground and restore focus by title or HWND.",
     tags=["os", "windows", "gui"],
+    purpose="Focus a desktop window without closing or terminating it.",
+    capabilities=[
+        "Find a window by title query or handle.",
+        "Restore and bring the target window to the foreground.",
+    ],
+    use_when=[
+        "The user wants to switch to or focus an existing window.",
+    ],
+    avoid_when=[
+        "The user wants the application to close or the process to terminate.",
+        "The user wants only media playback to stop or pause.",
+    ],
+    examples=[
+        "Bring an existing application window to the foreground.",
+    ],
+    side_effect="Changes window focus and visibility state; does not terminate the target application.",
 )
 def focus_window(
     title_query: Optional[str] = None,

@@ -271,8 +271,33 @@ def _play_local_media(path_or_query: str, auto_open: bool) -> dict[str, Any]:
 
 @tool(
     name="play_song",
-    description="Resolves and plays songs or audio queries on YouTube, Spotify, SoundCloud, Apple Music, JioSaavn, or local media via native application or web browser.",
+    description=(
+        "Music and audio playback for songs, artists, albums, playlists, audio searches, and explicitly "
+        "supplied local media files. Use this tool when the user's intended target is audio/media playback "
+        "on a supported service or a local file; do not use it as a substitute for application control, "
+        "general website navigation, or unrelated operating-system actions."
+    ),
     tags=["media", "music", "audio", "playback"],
+    purpose="Start music/audio playback or resolve an audio track on a supported platform.",
+    capabilities=[
+        "Search for a song, artist, album, or playlist on a supported music service.",
+        "Open an explicitly provided local media file with the system media player.",
+    ],
+    use_when=[
+        "The intended target is music/audio playback or a named audio track.",
+        "The user explicitly supplies a local media file to open.",
+    ],
+    avoid_when=[
+        "The user intends to close, launch, focus, or otherwise control a desktop application.",
+        "The user intends to pause or stop an existing Windows media session without choosing new content.",
+        "The user intends to navigate or interact with a website rather than start a music search.",
+    ],
+    examples=[
+        "Play a named song by a named artist.",
+        "Search a music service for an album or playlist.",
+        "Open an explicitly supplied local media file.",
+    ],
+    side_effect="Starts playback or opens a service/application; does not close an existing app.",
 )
 def play_song(
     query: str,
@@ -281,11 +306,12 @@ def play_song(
     browser: str | None = None,
 ) -> dict[str, Any]:
     """
-    Search and play a song on YouTube, Spotify, SoundCloud, Apple Music, JioSaavn, or local media.
+    Search for music/audio on a supported service, or open an explicitly supplied local media file.
+    Select this tool based on the requested target and the supported media operations.
 
     Args:
-        query: Song name, artist, query phrase, or local file path (e.g. 'Bohemian Rhapsody Queen').
-        platform: Target playback platform ('youtube', 'spotify', 'soundcloud', 'apple_music', 'jiosaavn', 'local', defaults to 'youtube').
+        query: Song/artist/album/playlist/audio query, or an explicit local media file path.
+        platform: Target platform. Defaults to YouTube for music requests only.
         auto_open: If True, automatically launches playback in default browser or application (defaults to True).
         browser: Optional preferred browser executable or name (e.g. 'brave', 'chrome', 'firefox', 'edge').
 

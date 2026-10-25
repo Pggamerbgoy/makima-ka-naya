@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from makima.voice.gemini_live import DEFAULT_LIVE_MODEL, GeminiLiveSession
+from makima.tools.registry import get_registry
+from makima.tools.selection import ToolExecutionGateway
 
 logger = logging.getLogger("makima.api.voice_ws")
 router = APIRouter()
@@ -34,6 +36,11 @@ async def voice_bridge(websocket: WebSocket) -> None:
     receive_task: Optional[asyncio.Task[Any]] = None
     session_id = f"voice_{uuid.uuid4().hex[:12]}"
     send_lock = asyncio.Lock()
+    registry = getattr(websocket.app.state, "registry", None) or get_registry(auto_discover=True)
+    execution_gateway = ToolExecutionGateway(
+        registry,
+        lambda: getattr(websocket.app.state, "disabled_tools", set()),
+    )
 
     async def send_json(event: Dict[str, Any]) -> None:
         event.setdefault("session_id", session_id)
@@ -90,6 +97,7 @@ async def voice_bridge(websocket: WebSocket) -> None:
                 session = GeminiLiveSession(
                     model=str(payload.get("model") or DEFAULT_LIVE_MODEL),
                     voice_name=str(payload.get("voice_name") or "Aoede"),
+                    execution_gateway=execution_gateway,
                 )
                 try:
                     await session.connect()
