@@ -146,32 +146,35 @@ class ToolSelectionService:
         query: str,
         tool_metadata: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        texts = [_schema_text(schema, tool_metadata) for schema in schemas]
-        embedder = self._get_embedder()
-        catalog_vectors = self._get_catalog_vectors(texts)
-        query_vector = self._vector_list(embedder.embed([f"User request and current task context: {query}"]))[0]
-        scores = [self._cosine(query_vector, vector) for vector in catalog_vectors]
+        with self._lock:
+            texts = [_schema_text(schema, tool_metadata) for schema in schemas]
+            embedder = self._get_embedder()
+            catalog_vectors = self._get_catalog_vectors(texts)
+            query_vector = self._vector_list(
+                embedder.embed([f"User request and current task context: {query}"])
+            )[0]
+            scores = [self._cosine(query_vector, vector) for vector in catalog_vectors]
 
-        minimum_similarity = float(getattr(self.config, "minimum_similarity", 0.20))
-        minimum_candidates = max(1, int(getattr(self.config, "minimum_candidates", 16)))
-        maximum_candidates = max(minimum_candidates, int(getattr(self.config, "max_candidates", 32)))
+            minimum_similarity = float(getattr(self.config, "minimum_similarity", 0.20))
+            minimum_candidates = max(1, int(getattr(self.config, "minimum_candidates", 16)))
+            maximum_candidates = max(minimum_candidates, int(getattr(self.config, "max_candidates", 32)))
 
-        ranked_indices = sorted(range(len(schemas)), key=lambda index: scores[index], reverse=True)
-        if not ranked_indices or scores[ranked_indices[0]] < minimum_similarity:
-            logger.info(
-                "Tool selection confidence is low; keeping all %d registered schemas available.",
-                len(schemas),
-            )
-            return schemas
+            ranked_indices = sorted(range(len(schemas)), key=lambda index: scores[index], reverse=True)
+            if not ranked_indices or scores[ranked_indices[0]] < minimum_similarity:
+                logger.info(
+                    "Tool selection confidence is low; keeping all %d registered schemas available.",
+                    len(schemas),
+                )
+                return schemas
 
-        relevant = [index for index in ranked_indices if scores[index] >= minimum_similarity]
-        if len(relevant) < minimum_candidates:
-            relevant = ranked_indices[:minimum_candidates]
-        selected_indices = ranked_indices[:maximum_candidates] if len(relevant) > maximum_candidates else relevant
+            relevant = [index for index in ranked_indices if scores[index] >= minimum_similarity]
+            if len(relevant) < minimum_candidates:
+                relevant = ranked_indices[:minimum_candidates]
+            selected_indices = ranked_indices[:maximum_candidates] if len(relevant) > maximum_candidates else relevant
 
-        # Keep provider schema ordering stable for predictable request payloads and caching.
-        chosen = set(selected_indices)
-        return [schema for index, schema in enumerate(schemas) if index in chosen]
+            # Keep provider schema ordering stable for predictable request payloads and caching.
+            chosen = set(selected_indices)
+            return [schema for index, schema in enumerate(schemas) if index in chosen]
 
     async def select_schemas(
         self,
@@ -188,13 +191,12 @@ class ToolSelectionService:
             return schemas
 
         try:
-            with self._lock:
-                selected = await asyncio.to_thread(
-                    self._select_sync,
-                    list(schemas),
-                    query.strip(),
-                    tool_metadata,
-                )
+            selected = await asyncio.to_thread(
+                self._select_sync,
+                list(schemas),
+                query.strip(),
+                tool_metadata,
+            )
             logger.info(
                 "Semantic tool retrieval selected %d of %d schemas for the current request.",
                 len(selected),
