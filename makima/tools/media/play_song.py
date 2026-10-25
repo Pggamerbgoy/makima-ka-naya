@@ -271,7 +271,14 @@ def _play_local_media(path_or_query: str, auto_open: bool) -> dict[str, Any]:
 
 @tool(
     name="play_song",
-    description="Resolves and plays songs or audio queries on YouTube, Spotify, SoundCloud, Apple Music, JioSaavn, or local media via native application or web browser.",
+    description=(
+        "Music/audio playback tool for songs, artists, albums, playlists, and audio tracks. "
+        "Use ONLY when the user wants to listen to music or explicitly open a local media file. "
+        "Do NOT use for online anime episodes, TV series, movies, AMVs, trailers, or ordinary video viewing. "
+        "For online video requests, use browser_interact to open the explicitly requested or saved preferred "
+        "streaming site, then search for and select the requested title. The default platform 'youtube' "
+        "applies to music requests only; it is NOT a default website for anime or other videos."
+    ),
     tags=["media", "music", "audio", "playback"],
 )
 def play_song(
@@ -281,11 +288,13 @@ def play_song(
     browser: str | None = None,
 ) -> dict[str, Any]:
     """
-    Search and play a song on YouTube, Spotify, SoundCloud, Apple Music, JioSaavn, or local media.
+    Search for and play music/audio on a supported service, or open an explicitly supplied local media file.
+    This tool is not for searching or watching online anime episodes, TV series, movies, AMVs, trailers,
+    or general video content; use the browser tool for those requests.
 
     Args:
-        query: Song name, artist, query phrase, or local file path (e.g. 'Bohemian Rhapsody Queen').
-        platform: Target playback platform ('youtube', 'spotify', 'soundcloud', 'apple_music', 'jiosaavn', 'local', defaults to 'youtube').
+        query: Song/artist/album/playlist/audio query, or an explicit local media file path.
+        platform: Target platform. Defaults to YouTube for music requests only.
         auto_open: If True, automatically launches playback in default browser or application (defaults to True).
         browser: Optional preferred browser executable or name (e.g. 'brave', 'chrome', 'firefox', 'edge').
 
