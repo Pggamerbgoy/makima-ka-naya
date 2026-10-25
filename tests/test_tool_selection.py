@@ -224,7 +224,7 @@ def test_selection_context_keeps_user_corrections_and_observed_tool_results() ->
 
     assert '"tool": "control_media"' in context
     assert '"action": "stop"' in context
-    assert "Observed tool result (control_media)" in context
+    assert "Recent observed result (control_media)" in context
     assert "Keep the music playing" in context
 
 
