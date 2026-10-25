@@ -100,9 +100,28 @@ def _infer_tool_tags(content: str, prior_messages: Optional[List[Any]] = None) -
                     elif any(w in tc_name for w in ("window", "screenshot", "mouse", "keyboard", "desktop")):
                         matched_tags.update(["desktop", "os", "apps", "windows"])
 
-    # 1. Media / Audio / Video / Anime Playback
-    if any(k in c for k in ("play", "music", "song", "spotify", "youtube", "volume", "sound", "track", "pause", "resume", "audio", "anime", "video", "movie", "series", "watch", "stream", "dekhta", "sunta")):
-        matched_tags.update(["media", "music", "playback", "volume", "audio", "browser", "web"])
+    # 1. Video/anime requests need browser tools, not music-only tools.
+    # This scopes available tool schemas; the model still interprets the actual request.
+    video_terms = (
+        "anime", "episode", "episodes", "season", "seasons", "movie", "movies",
+        "film", "films", "tv show", "series", "watch", "watching", "video", "videos",
+        "trailer", "trailers", "amv", "miruro", "crunchyroll", "hidive", "aniwatch",
+        "dekh", "dekhta", "dekhna", "dikhana",
+    )
+    is_video_request = any(term in c for term in video_terms)
+    if is_video_request:
+        # Remove media tags inherited from prior turns too, so play_song is not exposed
+        # just because the preceding request was about music.
+        matched_tags.difference_update({"media", "music", "playback", "volume", "audio"})
+        matched_tags.update(["web", "browser", "fetch", "search"])
+    else:
+        # Music/audio and explicitly platform-specific playback requests.
+        if any(k in c for k in (
+            "play", "music", "song", "spotify", "youtube", "volume", "sound",
+            "track", "pause", "resume", "audio", "gaana", "sunta", "playlist",
+            "album", "artist", "singer", "listen",
+        )):
+            matched_tags.update(["media", "music", "playback", "volume", "audio", "browser", "web"])
 
     # 2. Web Browsing / Online Search
     if any(k in c for k in ("search", "google", "browse", "website", "url", "http", "click", "web", "fetch", "news", "price", "flipkart", "amazon", "miruro")):
