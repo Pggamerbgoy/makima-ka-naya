@@ -35,6 +35,7 @@ from makima.provider.cache import get_cache_manager
 from makima.provider.router import ParetoRouter
 from makima.runtime import build_engine, build_plugin_manager, build_registry
 from makima.tools.registry import ToolRegistry, get_registry
+from makima.tools.selection import ToolExecutionGateway
 from makima.plugins import PluginManifest
 from makima.voice.gemini_live import DEFAULT_LIVE_MODEL
 
@@ -1070,6 +1071,10 @@ def create_app(
 
         try:
             reg = request.app.state.registry or get_registry(auto_discover=True)
+            execution_gateway = ToolExecutionGateway(
+                reg,
+                lambda: getattr(request.app.state, "disabled_tools", set()),
+            )
             user_message_id = f"message_{uuid.uuid4().hex}"
             if body.session_id and effective_prompt:
                 request.app.state.session_store.add_message(
@@ -1083,7 +1088,8 @@ def create_app(
                 prompt=effective_prompt,
                 messages=parsed_messages,
                 system_prompt=body.system_prompt,
-                tools=reg,
+                tools=execution_gateway,
+                tool_executor=execution_gateway.execute,
                 task=body.task,
                 temperature=body.temperature,
                 max_turns=body.max_turns,
