@@ -141,6 +141,94 @@ async def test_execution_gateway_enforces_enabled_state_and_per_turn_allowlist()
 
 
 @pytest.mark.asyncio
+async def test_structured_tool_metadata_is_included_in_model_schema() -> None:
+    registry = ToolRegistry(name="metadata-test")
+
+    async def close_application(app_name: str) -> dict[str, Any]:
+        return {"success": True, "app_name": app_name}
+
+    tool = registry.register(
+        close_application,
+        name="close_application",
+        description="Close a running desktop application.",
+        tags=["apps", "control"],
+        purpose="Close a named application without changing media playback.",
+        capabilities=["Close a target application by name."],
+        use_when=["The target is a running desktop application."],
+        avoid_when=["The user asks only to pause or stop media playback."],
+        examples=["Close a desktop application while leaving music playing."],
+        side_effect="Requests application closure.",
+    )
+
+    description = tool.to_schema()["function"]["description"]
+
+    assert "Purpose:" in description
+    assert "Capabilities:" in description
+    assert "Use when:" in description
+    assert "Do not use when:" in description
+    assert "Examples:" in description
+    assert "Side effects:" in description
+
+
+@pytest.mark.asyncio
+async def test_gateway_applies_command_guardrails_for_every_interface() -> None:
+    registry = ToolRegistry(name="guardrail-test")
+
+    async def execute_command(command: str) -> dict[str, Any]:
+        return {"success": True, "command": command}
+
+    registry.register(
+        execute_command,
+        name="execute_command",
+        description="Execute a shell command.",
+        tags=["terminal", "execution"],
+    )
+    gateway = ToolExecutionGateway(registry)
+
+    result = await gateway.execute(
+        "execute_command",
+        {"command": "format C:"},
+        allowed_tool_names={"execute_command"},
+    )
+
+    assert "[GUARDRAIL_BLOCKED: execute_command]" in result
+
+
+def test_selection_context_keeps_user_corrections_and_observed_tool_results() -> None:
+    from makima.provider.adapters.base import Message
+
+    messages = [
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="old-call",
+                    name="control_media",
+                    arguments={"action": "stop"},
+                )
+            ],
+        ),
+        Message(
+            role="tool",
+            name="control_media",
+            content='{"success": true, "action": "stop", "source_app": "Claude"}',
+        ),
+        Message(role="user", content="Keep the music playing and close the app."),
+    ]
+
+    context = HermesAgentEngine._tool_selection_context(
+        "Keep the music playing and close the app.",
+        messages,
+    )
+
+    assert '"tool": "control_media"' in context
+    assert '"action": "stop"' in context
+    assert "Observed tool result (control_media)" in context
+    assert "Keep the music playing" in context
+
+
+@pytest.mark.asyncio
 async def test_engine_never_executes_a_tool_absent_from_current_schemas() -> None:
     engine = HermesAgentEngine(router=object(), enable_implicit_learning=False)
     called: list[str] = []
