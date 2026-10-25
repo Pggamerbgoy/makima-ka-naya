@@ -608,8 +608,10 @@ class HermesAgentEngine:
         if not working_messages:
             raise ValueError("HermesAgentEngine requires either 'prompt' or non-empty 'messages'.")
 
-        # Resolve tools schemas and executor (duck-type compatible with ToolRegistry)
-        tool_schemas: Optional[List[Dict[str, Any]]] = None
+        # Resolve the complete currently enabled tool catalogue once for this request.
+        # Candidate retrieval is repeated at each agent turn using updated conversation and tool results.
+        tool_catalog_schemas: Optional[List[Dict[str, Any]]] = None
+        tool_metadata: Dict[str, Any] = {}
         effective_executor = tool_executor
 
         if tools is not None:
@@ -617,23 +619,15 @@ class HermesAgentEngine:
                 try:
                     sig = inspect.signature(tools.get_schemas)
                     if "tags" in sig.parameters and tool_tags is not None:
-                        tool_schemas = tools.get_schemas(tags=tool_tags)
+                        tool_catalog_schemas = tools.get_schemas(tags=tool_tags)
                     else:
-                        tool_schemas = tools.get_schemas()
+                        tool_catalog_schemas = tools.get_schemas()
                 except Exception:
-                    tool_schemas = tools.get_schemas()
+                    tool_catalog_schemas = tools.get_schemas()
                 if effective_executor is None and hasattr(tools, "execute"):
                     effective_executor = tools.execute
-            elif isinstance(tools, list):
-                tool_schemas = tools
 
-        # Semantic candidate retrieval keeps the catalog dynamic without request-keyword rules.
-        if tool_schemas:
-            if is_trivial_greeting and len(tool_schemas) > 20:
-                tool_schemas = None
-            else:
-                tool_metadata: Dict[str, Any] = {}
-                if tools is not None and hasattr(tools, "list_tools") and callable(tools.list_tools):
+                if hasattr(tools, "list_tools") and callable(tools.list_tools):
                     try:
                         available_objects = (
                             tools.list_tools(tags=tool_tags)
@@ -647,42 +641,37 @@ class HermesAgentEngine:
                         }
                     except Exception as exc:
                         logger.debug("Tool metadata lookup skipped: %s", exc)
+            elif isinstance(tools, list):
+                tool_catalog_schemas = tools
 
-                selection_context = self._tool_selection_context(prompt, working_messages)
-                tool_schemas = await self.tool_selector.select_schemas(
-                    tool_schemas,
-                    selection_context,
-                    tool_metadata=tool_metadata,
-                )
+        if tool_catalog_schemas:
+            seen_names = set()
+            deduped_schemas = []
+            for schema in tool_catalog_schemas:
+                if not isinstance(schema, dict):
+                    continue
+                if schema.get("type") == "function" and isinstance(schema.get("function"), dict):
+                    name = schema["function"].get("name")
+                else:
+                    name = schema.get("name")
 
-            if tool_schemas:
-                seen_names = set()
-                deduped_schemas = []
-                for schema in tool_schemas:
-                    if not isinstance(schema, dict):
+                if name:
+                    if name in seen_names:
                         continue
-                    if schema.get("type") == "function" and isinstance(schema.get("function"), dict):
-                        name = schema["function"].get("name")
-                    else:
-                        name = schema.get("name")
+                    seen_names.add(name)
+                deduped_schemas.append(schema)
 
-                    if name:
-                        if name in seen_names:
-                            continue
-                        seen_names.add(name)
-                    deduped_schemas.append(schema)
-
-                # Preserve deterministic schema ordering for provider-side prefix caching.
-                deduped_schemas.sort(
-                    key=lambda schema: (
-                        schema.get("function", {}).get("name", "")
-                        if isinstance(schema.get("function"), dict)
-                        else schema.get("name", "")
-                    )
+            # Preserve deterministic catalogue ordering for provider-side prefix caching.
+            deduped_schemas.sort(
+                key=lambda schema: (
+                    schema.get("function", {}).get("name", "")
+                    if isinstance(schema.get("function"), dict)
+                    else schema.get("name", "")
                 )
-                tool_schemas = deduped_schemas or None
+            )
+            tool_catalog_schemas = deduped_schemas or None
         else:
-            tool_schemas = None
+            tool_catalog_schemas = None
 
         turn = 0
         total_tool_calls = 0
@@ -744,7 +733,15 @@ class HermesAgentEngine:
                 )
 
             # 2. Query provider along Pareto frontier with automatic failover
-            active_tools_for_turn = tool_schemas
+            active_tools_for_turn = tool_catalog_schemas
+            if active_tools_for_turn:
+                selection_context = self._tool_selection_context(prompt, working_messages)
+                active_tools_for_turn = await self.tool_selector.select_schemas(
+                    tool_catalog_schemas,
+                    selection_context,
+                    tool_metadata=tool_metadata,
+                )
+
             # When active tools are provided to the model, strictly clamp temperature
             # to 0.0 to guarantee deterministic tool selection and exact parameter formatting,
             # eliminating random token sampling drift. For pure conversational turns (no tools),
