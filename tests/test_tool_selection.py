@@ -522,3 +522,77 @@ async def test_explicit_registry_reload_replaces_stale_tool_implementation() -> 
 
     assert registry["reloadable_action"].fn is new_implementation
     assert await registry.execute("reloadable_action", {}) == "new"
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled", "limit"),
+    [(False, 8), (True, 1)],
+)
+async def test_configured_tool_concurrency_is_honored(
+    monkeypatch: Any,
+    enabled: bool,
+    limit: int,
+) -> None:
+    import makima.config as config_module
+
+    selection = SimpleNamespace(
+        enabled=False,
+        embedding_model="test",
+        max_candidates=96,
+        minimum_candidates=24,
+        minimum_similarity=0.2,
+    )
+    concurrency = SimpleNamespace(
+        enabled=enabled,
+        max_concurrency=limit,
+        parallel_safe_tags=["search"],
+        mutating_tags=["write"],
+    )
+    fake_settings = SimpleNamespace(
+        tools=SimpleNamespace(selection=selection, concurrency=concurrency),
+        tool_timeout=2.0,
+        max_tool_output_chars=16000,
+    )
+    monkeypatch.setattr(config_module, "get_settings", lambda: fake_settings)
+
+    registry = ToolRegistry(name=f"concurrency-{enabled}-{limit}")
+    active = 0
+    max_active = 0
+
+    async def harmless_read() -> dict[str, bool]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return {"ok": True}
+
+    first_name = f"concurrency_tool_a_{enabled}_{limit}"
+    second_name = f"concurrency_tool_b_{enabled}_{limit}"
+    registry.register(harmless_read, name=first_name, parallel_safe=True, tags=["search"])
+    registry.register(harmless_read, name=second_name, parallel_safe=True, tags=["search"])
+
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id="parallel-a", name=first_name, arguments={}),
+                ToolCall(id="parallel-b", name=second_name, arguments={}),
+            ],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="Done.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(
+        router=router,
+        tool_selector=ToolSelectionService(selection, embedding_factory=lambda _model: DirectionalEmbedding()),
+        enable_implicit_learning=False,
+    )
+
+    result = await engine.run(prompt="Check both harmless states", tools=registry)
+
+    assert result.completed is True
+    assert max_active <= limit if enabled else max_active == 1
