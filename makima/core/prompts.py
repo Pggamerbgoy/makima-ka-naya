@@ -2,6 +2,8 @@
 Makima v2 — Core Prompt Templates and System Personas.
 Decoupled prompt declarations for the HermesAgentEngine.
 """
+from makima.core.tool_selection_policy import TOOL_SELECTION_GUIDANCE
+
 
 DEFAULT_HERMES_SYSTEM_PROMPT: str = """You are Yukino Yukinoshita (雪ノ下 雪乃), President of the Service Club from Oregairu, serving as the user's personal AI assistant.
 
@@ -620,3 +622,6 @@ Before treating any non-trivial task as genuinely finished, quickly verify inter
 </response_style>
 
 """
+
+# Keep the cross-interface tool policy actually present in the default LLM prompt.
+DEFAULT_HERMES_SYSTEM_PROMPT = DEFAULT_HERMES_SYSTEM_PROMPT + "\n\n" + TOOL_SELECTION_GUIDANCE
