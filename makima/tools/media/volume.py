@@ -41,8 +41,14 @@ def _com_initialized():
 
 @tool(
     name="get_volume",
-    description="Gets the Windows master audio volume percentage (0.0 to 100.0) and mute status.",
+    description="Reads the current Windows master audio volume percentage (0.0 to 100.0) and mute status without changing anything.",
     tags=["media", "volume", "audio", "windows"],
+    purpose="Read the current system-wide output volume and mute state.",
+    capabilities=["Report current master volume percentage, mute status, and output device."],
+    use_when=["The user asks what the current system volume or mute state is."],
+    avoid_when=["The user asks to change volume or mute state; use set_volume or toggle_mute respectively."],
+    examples=["Check the current master volume."],
+    side_effect="Read-only; does not change audio settings.",
 )
 def get_volume() -> Dict[str, Any]:
     """
@@ -72,8 +78,14 @@ def get_volume() -> Dict[str, Any]:
 
 @tool(
     name="set_volume",
-    description="Sets the Windows master audio volume percentage (clamps between 0.0 and 100.0).",
+    description="Sets the Windows master output volume to an explicit percentage from 0.0 to 100.0.",
     tags=["media", "volume", "audio", "windows"],
+    purpose="Set the system-wide master output volume to a requested level.",
+    capabilities=["Set an exact master volume percentage; values are clamped to 0–100."],
+    use_when=["The user explicitly requests a volume level or asks to raise/lower volume by a clear amount."],
+    avoid_when=["The user asks to pause/stop/resume a track; use control_media.","The user asks only whether audio is muted or what the current volume is; use get_volume."],
+    examples=["Set system volume to 40 percent.","Lower volume to 25 percent."],
+    side_effect="Changes system-wide output volume.",
 )
 def set_volume(percent: float) -> Dict[str, Any]:
     """
@@ -107,8 +119,14 @@ def set_volume(percent: float) -> Dict[str, Any]:
 
 @tool(
     name="toggle_mute",
-    description="Toggles the Windows master audio mute status.",
+    description="Toggles the Windows system-wide master output mute state; it does not change the volume percentage.",
     tags=["media", "volume", "audio", "windows"],
+    purpose="Toggle the system-wide audio mute state.",
+    capabilities=["Mute currently unmuted audio or unmute currently muted audio."],
+    use_when=["The user explicitly asks to mute or unmute system audio without specifying a new volume percentage."],
+    avoid_when=["The user specifies an exact volume percentage; use set_volume.","The user asks to stop/pause a song or video; use control_media."],
+    examples=["Mute system audio.","Unmute the speakers."],
+    side_effect="Changes system-wide mute state.",
 )
 def toggle_mute() -> Dict[str, Any]:
     """
