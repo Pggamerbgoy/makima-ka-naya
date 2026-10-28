@@ -897,7 +897,7 @@ class HermesAgentEngine:
         consecutive_identical_batches = 0
         signature_history: List[str] = []
         force_synthesis_next_turn = False
-        force_full_tool_catalog_next_turn = False
+        pending_tool_schemas_next_turn: Set[str] = set()
 
         # Hermes Autonomous While-Loop
         while turn < limit_turns:
@@ -950,19 +950,47 @@ class HermesAgentEngine:
 
             # 2. Query provider along Pareto frontier with automatic failover
             active_tools_for_turn = tool_catalog_schemas
-            if force_full_tool_catalog_next_turn:
-                active_tools_for_turn = all_tool_catalog_schemas or tool_catalog_schemas
-                logger.warning(
-                    "Expanding tool schemas to the full enabled catalogue after a hidden-tool request or tool failure."
-                )
-                force_full_tool_catalog_next_turn = False
-            elif active_tools_for_turn:
+            if active_tools_for_turn:
                 selection_context = self._tool_selection_context(prompt, working_messages)
                 active_tools_for_turn = await self.tool_selector.select_schemas(
                     tool_catalog_schemas,
                     selection_context,
                     tool_metadata=tool_metadata,
                 )
+
+            # Recover only the specific hidden or fallback tools requested/needed.
+            # Re-sending the entire ~68-tool catalogue for one missed tool would
+            # waste tokens and make unrelated tool calls more likely.
+            if pending_tool_schemas_next_turn:
+                def _schema_name(schema: Dict[str, Any]) -> str:
+                    function_schema = schema.get("function")
+                    name = (
+                        function_schema.get("name")
+                        if isinstance(function_schema, dict)
+                        else schema.get("name")
+                    )
+                    return str(name or "")
+
+                known_active_names = {
+                    _schema_name(schema)
+                    for schema in (active_tools_for_turn or [])
+                    if isinstance(schema, dict)
+                }
+                recovery_schemas = [
+                    schema
+                    for schema in (all_tool_catalog_schemas or tool_catalog_schemas or [])
+                    if isinstance(schema, dict)
+                    and _schema_name(schema) in pending_tool_schemas_next_turn
+                    and _schema_name(schema) not in known_active_names
+                ]
+                if recovery_schemas:
+                    active_tools_for_turn = list(active_tools_for_turn or []) + recovery_schemas
+                    active_tools_for_turn.sort(key=_schema_name)
+                    logger.info(
+                        "Added targeted recovery schemas for tools: %s",
+                        [_schema_name(schema) for schema in recovery_schemas],
+                    )
+                pending_tool_schemas_next_turn.clear()
 
             # When active tools are provided to the model, strictly clamp temperature
             # to 0.0 to guarantee deterministic tool selection and exact parameter formatting,
@@ -1192,10 +1220,10 @@ class HermesAgentEngine:
                 and _canonical_tool_name(call.name) not in active_tool_names
             }
             if hidden_registered_calls:
-                force_full_tool_catalog_next_turn = True
+                pending_tool_schemas_next_turn.update(hidden_registered_calls)
                 logger.warning(
                     "Model requested registered tools omitted by semantic retrieval: %s. "
-                    "The calls are blocked for this turn; the full catalogue will be exposed next turn.",
+                    "The calls are blocked for this turn; only those tool schemas will be added next turn.",
                     sorted(hidden_registered_calls),
                 )
 
@@ -1266,8 +1294,20 @@ class HermesAgentEngine:
                     or status in {"error", "failed", "failure"}
                 )
 
-            if any(_tool_output_signals_failure(output) for output in ordered_outputs):
-                force_full_tool_catalog_next_turn = True
+            failed_primary_names = {
+                (call.name.split(":")[-1] if ":" in call.name else call.name)
+                for call, output in zip(response.tool_calls, ordered_outputs)
+                if _tool_output_signals_failure(output)
+            }
+            for failed_name in failed_primary_names:
+                # Conditional fallbacks are hidden during normal turns. When their
+                # primary fails, expose only the related fallback(s) on the next turn.
+                pending_tool_schemas_next_turn.update(
+                    str(getattr(tool_object, "name"))
+                    for tool_object in tool_metadata.values()
+                    if getattr(tool_object, "name", None)
+                    and str(getattr(tool_object, "fallback_for", "")) == failed_name
+                )
 
             # Multi-pattern tool invocation loop detection
             try:
