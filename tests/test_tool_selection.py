@@ -6,7 +6,7 @@ from typing import Any, Iterable, List
 import pytest
 
 from makima.core.engine import HermesAgentEngine
-from makima.provider.adapters.base import ToolCall
+from makima.provider.adapters.base import ProviderResponse, ToolCall
 from makima.tools.registry import ToolRegistry
 from makima.tools.selection import ToolExecutionGateway, ToolSelectionService
 
@@ -245,3 +245,188 @@ async def test_engine_never_executes_a_tool_absent_from_current_schemas() -> Non
 
     assert result.startswith("[TOOL_NOT_AVAILABLE")
     assert called == []
+
+
+
+class QueueRouter:
+    """Small deterministic router for exercising engine wiring without a provider."""
+
+    def __init__(self, responses: list[ProviderResponse]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict[str, Any]] = []
+
+    def get_ranked_candidates(self, _task: str = "fast_chat") -> list[Any]:
+        return []
+
+    async def execute_with_fallback(self, **kwargs: Any) -> ProviderResponse:
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise AssertionError("Unexpected provider call: response queue is empty")
+        return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_plain_text_tool_trace_is_never_executed() -> None:
+    router = QueueRouter([
+        ProviderResponse(
+            content=(
+                "I'll check that now.\\n"
+                "[Executed Tools in Turn: browser_interact(action='navigate', url='https://example.com') -> ok]"
+            ),
+            tool_calls=[],
+            finish_reason="stop",
+            model="mock",
+        )
+    ])
+    engine = HermesAgentEngine(router=router, enable_implicit_learning=False)
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    async def executor(name: str, args: dict[str, Any]) -> dict[str, bool]:
+        executed.append((name, args))
+        return {"success": True}
+
+    result = await engine.run(
+        prompt="Open example.com",
+        tools=[schema("browser_interact", "Navigate a browser to a URL.")],
+        tool_executor=executor,
+    )
+
+    assert executed == []
+    assert result.tool_calls_executed == 0
+    assert "[Executed Tools in Turn:" not in result.content
+    assert "No action was executed" in result.content
+
+
+@pytest.mark.asyncio
+async def test_no_tools_exposed_means_structured_tool_calls_are_blocked() -> None:
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="call-1", name="unexposed_action", arguments={})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="No action was run.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(router=router, enable_implicit_learning=False)
+    executed: list[str] = []
+
+    async def executor(name: str, _args: dict[str, Any]) -> dict[str, bool]:
+        executed.append(name)
+        return {"success": True}
+
+    result = await engine.run(
+        prompt="Do something",
+        tools=None,
+        tool_executor=executor,
+    )
+
+    assert executed == []
+    assert "[TOOL_NOT_AVAILABLE: unexposed_action]" in "\\n".join(
+        message.content or "" for message in result.messages if message.role == "tool"
+    )
+
+
+@pytest.mark.asyncio
+async def test_semantic_selector_miss_expands_full_catalog_on_next_turn() -> None:
+    names = ["a_weather"] + [f"mid_tool_{i:02d}" for i in range(34)] + ["z_set_volume"]
+    schemas = [schema(name, f"Tool named {name}.") for name in names]
+
+    class NarrowSelector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def select_schemas(self, available: list[dict[str, Any]], query: str, *, tool_metadata: Any = None) -> list[dict[str, Any]]:
+            self.calls += 1
+            return [next(item for item in available if item["function"]["name"] == "a_weather")]
+
+    selector = NarrowSelector()
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="hidden-1", name="z_set_volume", arguments={"volume": 40})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="visible-2", name="z_set_volume", arguments={"volume": 40})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="Volume set to 40.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(
+        router=router,
+        tool_selector=selector,
+        enable_implicit_learning=False,
+        max_turns=5,
+    )
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    async def executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        executed.append((name, args))
+        return {"success": True, "volume": args["volume"]}
+
+    result = await engine.run(
+        prompt="Set volume to 40",
+        tools=schemas,
+        tool_executor=executor,
+    )
+
+    assert selector.calls == 1, "The failed retrieval must trigger a full-catalog turn, not repeat the same narrowing."
+    assert "z_set_volume" not in {
+        item["function"]["name"] for item in router.calls[0]["tools"]
+    }
+    assert "z_set_volume" in {
+        item["function"]["name"] for item in router.calls[1]["tools"]
+    }
+    assert executed == [("z_set_volume", {"volume": 40})]
+    assert result.completed is True
+
+
+@pytest.mark.asyncio
+async def test_custom_schema_set_does_not_borrow_parallel_safety_from_global_registry() -> None:
+    from makima.tools.registry import get_registry
+
+    unique_a = "parallel_probe_a_82f1"
+    unique_b = "parallel_probe_b_82f1"
+
+    async def global_read() -> dict[str, bool]:
+        return {"ok": True}
+
+    reg = get_registry()
+    reg.register(global_read, name=unique_a, parallel_safe=True)
+    reg.register(global_read, name=unique_b, parallel_safe=True)
+
+    active = 0
+    max_active = 0
+
+    async def custom_executor(name: str, _args: dict[str, Any]) -> dict[str, bool]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return {"tool": name}
+
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id="parallel-a", name=unique_a, arguments={}),
+                ToolCall(id="parallel-b", name=unique_b, arguments={}),
+            ],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="Done.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(router=router, enable_implicit_learning=False)
+    await engine.run(
+        prompt="Run the two custom actions",
+        tools=[schema(unique_a, "Custom action A."), schema(unique_b, "Custom action B.")],
+        tool_executor=custom_executor,
+    )
+
+    assert max_active == 1, "A raw schema list has no safety metadata; calls must be serialized."
