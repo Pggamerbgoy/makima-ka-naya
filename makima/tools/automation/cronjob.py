@@ -296,11 +296,33 @@ def _find_job(scheduler: AsyncIOScheduler, target: str) -> Optional[Job]:
 @tool(
     name="cronjob_manage",
     description=(
-        "Hermes-Style async job scheduler using APScheduler. "
-        "Supports one-shot delayed reminders (delay_seconds), recurring crontab schedules (schedule='0 9 * * *'), "
-        "and periodic intervals (schedule='interval:60'). Actions: create, list, pause, resume, remove, run."
+        "Manage Makima's scheduled reminders and recurring jobs. Supports a one-shot delay (delay_seconds), "
+        "5-field cron expression (for example schedule='0 9 * * *'), and intervals such as schedule='interval:60'. "
+        "Actions: create, list, pause, resume, remove, run. Use only for explicit scheduling or managing an existing job; "
+        "do not use it to perform an immediate task."
     ),
     tags=["automation", "cron", "scheduler", "jobs"],
+    purpose="Create, inspect, pause, resume, manually run, or remove scheduled reminders and recurring jobs.",
+    capabilities=[
+        "Create one-shot delayed jobs or recurring cron/interval jobs.",
+        "List existing jobs and their next run time.",
+        "Pause, resume, manually run, or remove a named job.",
+    ],
+    use_when=[
+        "The user explicitly asks to remind them later, schedule a future action, or repeat a task periodically.",
+        "The user asks to list, pause, resume, manually run, or remove an already scheduled job.",
+    ],
+    avoid_when=[
+        "The user asks for an immediate action rather than a scheduled one.",
+        "The user asks a question about time/date without requesting a reminder or recurring job.",
+        "The user asks to execute an automated workflow; confirm that a scheduled handler supports it instead of assuming the prompt field itself runs arbitrary workflows.",
+    ],
+    examples=[
+        "Remind me in 30 minutes to check the download.",
+        "Schedule a recurring status check every hour.",
+        "List and remove an existing reminder by name.",
+    ],
+    side_effect="Creates or changes scheduler jobs; jobs can continue firing until paused or removed.",
 )
 async def cronjob_manage(
     action: str,
