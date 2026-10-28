@@ -523,6 +523,11 @@ async def test_explicit_registry_reload_replaces_stale_tool_implementation() -> 
     assert registry["reloadable_action"].fn is new_implementation
     assert await registry.execute("reloadable_action", {}) == "new"
 
+    # Removed tool declarations must not survive an explicit package reload.
+    delattr(module, "reloadable_action")
+    registry.discover(package=module, reload=True)
+    assert not registry.has("reloadable_action")
+
 
 
 @pytest.mark.asyncio
