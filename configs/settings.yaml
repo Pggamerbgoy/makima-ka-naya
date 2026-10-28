@@ -21,11 +21,14 @@ providers:
 
   # Task Cascades: Prioritized free/active tiers
   cascades:
-    fast_chat: ["gemini_3_8_live", "gemini", "gemini_live", "groq", "openrouter_free", "ollama"]
-    code: ["gemini_3_8_live", "gemini", "gemini_live", "groq", "openrouter_free", "ollama"]
-    deep_reasoning: ["gemini_3_8_live", "gemini", "gemini_live", "groq", "openrouter_free", "ollama"]
-    vision: ["gemini_3_8_live", "gemini", "gemini_live"]
-    voice: ["gemini_3_8_live", "gemini_live"]
+    # Text/coding/reasoning use standard text-capable backends.
+    # Gemini Live is reserved for actual real-time voice sessions.
+    fast_chat: ["gemini", "groq", "openrouter_free", "ollama"]
+    code: ["ollama", "groq", "openrouter_free", "gemini"]
+    deep_reasoning: ["gemini", "openrouter_free", "ollama"]
+    vision: ["gemini"]
+    # One backend alias is enough; the previous two names resolved to the same model.
+    voice: ["gemini_live"]
     offline: ["ollama"]
     # OSWorld evaluates Makima end-to-end with Alibaba Cloud as its reasoning backend.
     osworld: [
