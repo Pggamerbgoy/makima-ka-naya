@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any, Iterable, List
 
 import pytest
 
 from makima.core.engine import HermesAgentEngine
 from makima.provider.adapters.base import ProviderResponse, ToolCall
-from makima.tools.registry import ToolRegistry
+from makima.tools.registry import Tool, ToolRegistry
 from makima.tools.selection import ToolExecutionGateway, ToolSelectionService
 
 
@@ -497,3 +497,28 @@ async def test_gemini_live_uses_injected_gateway_for_voice_tool_execution(monkey
     tool_result = next(event for event in events if event["type"] == "tool_result")
     assert "[TOOL_DISABLED: voice_test_action]" in str(tool_result["result"])
     assert session._session.sent, "The gateway result must be returned to Gemini as a function response."
+
+
+
+@pytest.mark.asyncio
+async def test_explicit_registry_reload_replaces_stale_tool_implementation() -> None:
+    registry = ToolRegistry(name="reload-test")
+
+    def old_implementation() -> str:
+        return "old"
+
+    registry.register(old_implementation, name="reloadable_action")
+    module = ModuleType("test_dynamic_plugin_module")
+
+    def new_implementation() -> str:
+        return "new"
+
+    new_tool = Tool.from_function(new_implementation, name="reloadable_action")
+    setattr(new_implementation, "__makima_tool__", True)
+    setattr(new_implementation, "__tool_obj__", new_tool)
+    setattr(module, "reloadable_action", new_implementation)
+
+    registry.discover(package=module, reload=True)
+
+    assert registry["reloadable_action"].fn is new_implementation
+    assert await registry.execute("reloadable_action", {}) == "new"
