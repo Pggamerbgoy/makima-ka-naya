@@ -7,7 +7,8 @@ from typing import Any, Iterable, List
 import pytest
 
 from makima.core.engine import HermesAgentEngine
-from makima.provider.adapters.base import ProviderResponse, ToolCall
+from makima.provider.adapters.base import Message, ProviderResponse, StreamChunk, ToolCall
+from makima.provider.router import ParetoCandidate, ParetoRouter, ProviderMetrics
 from makima.tools.registry import Tool, ToolRegistry
 from makima.tools.selection import ToolExecutionGateway, ToolSelectionService
 
@@ -733,3 +734,67 @@ async def test_openai_compatible_stream_preserves_fragmented_tool_calls(monkeypa
     assert calls[0].id == "call-stream-1"
     assert calls[0].name == "set_volume"
     assert calls[0].arguments == {"percent": 50}
+
+
+
+@pytest.mark.asyncio
+async def test_router_streaming_preserves_structured_tool_calls() -> None:
+    router = ParetoRouter()
+    router._initialized = True
+    router._ollama_probed_models = ["mock-local-model"]
+    metric = ProviderMetrics(default_latency_ms=100.0)
+    emitted: list[str] = []
+
+    class StreamingProvider:
+        is_available = True
+        config = SimpleNamespace(model="mock-stream-model", latency_tier="fast")
+
+        def __init__(self) -> None:
+            self.received_tools: list[dict[str, Any]] | None = None
+
+        async def stream(self, **kwargs: Any):
+            self.received_tools = kwargs.get("tools")
+            yield StreamChunk(delta="Setting volume now. ")
+            yield StreamChunk(
+                delta="",
+                tool_calls=[
+                    ToolCall(
+                        id="streamed-call-1",
+                        name="set_volume",
+                        arguments={"percent": 35},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+
+        async def generate(self, **_kwargs: Any) -> ProviderResponse:
+            raise AssertionError("Router must not bypass tool-capable streaming with generate().")
+
+    provider = StreamingProvider()
+    candidate = ParetoCandidate(
+        name="mock_stream",
+        provider=provider,  # type: ignore[arg-type]
+        cascade_rank=0,
+        latency_tier_score=1,
+        ewma_ms=100.0,
+        failure_count=0,
+        is_available=True,
+    )
+    router._providers = {"mock_stream": provider}  # type: ignore[assignment]
+    router._metrics = {"mock_stream": metric}
+    router.get_ranked_candidates = lambda _task: [candidate]  # type: ignore[method-assign]
+
+    response = await router.execute_with_fallback(
+        task="fast_chat",
+        messages=[Message(role="user", content="Set the system volume to 35 percent.")],
+        tools=[schema("set_volume", "Set the Windows master output volume.")],
+        on_chunk=lambda text: emitted.append(text),
+    )
+
+    assert emitted == ["Setting volume now. "]
+    assert provider.received_tools is not None
+    assert response.finish_reason == "tool_calls"
+    assert response.content == "Setting volume now. "
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "set_volume"
+    assert response.tool_calls[0].arguments == {"percent": 35}
