@@ -376,7 +376,7 @@ async def test_semantic_selector_miss_expands_full_catalog_on_next_turn() -> Non
         tool_executor=executor,
     )
 
-    assert selector.calls == 2, "Normal turns use semantic retrieval; the recovery turn alone must expose the full catalogue."
+    assert selector.calls == 3, "Semantic retrieval must run each turn; recovery should append only the missing tool schema."
     assert "z_set_volume" not in {
         item["function"]["name"] for item in router.calls[0]["tools"]
     }
