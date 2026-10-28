@@ -59,6 +59,7 @@ def get_last_som_marks() -> dict[int, dict[str, Any]]:
     name="annotate_window_som",
     description="Capture target window and overlay high-contrast Set-of-Marks (SoM) numbered badges (#1, #2, ...) on interactive controls. Returns marked image path and marks lookup table.",
     tags=["desktop", "vision", "som", "grounding"],
+    fallback_for="computer_use",
 )
 def annotate_window_som(
     title_query: str | None = None,
