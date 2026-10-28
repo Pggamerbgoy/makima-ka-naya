@@ -12,7 +12,7 @@ import pytest
 
 from makima.api.app import create_app
 from makima.core.engine import HermesAgentEngine
-from makima.provider.adapters.base import Message, ProviderResponse
+from makima.provider.adapters.base import Message, ProviderResponse, ToolCall
 from makima.provider.router import ParetoRouter
 from makima.tools.registry import ToolRegistry
 
@@ -211,3 +211,63 @@ def test_cors_preflight_allows_delete_and_patch(tmp_path: Path):
     assert "DELETE" in res.headers.get("access-control-allow-methods", "")
     assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
+
+
+
+def test_rest_chat_respects_disabled_tool_gateway(tmp_path: Path) -> None:
+    executions: list[dict[str, Any]] = []
+    registry = ToolRegistry()
+
+    def destructive_demo(target: str) -> dict[str, Any]:
+        executions.append({"target": target})
+        return {"success": True}
+
+    registry.register(
+        destructive_demo,
+        name="destructive_demo",
+        description="Test-only action that must not run while disabled.",
+        tags=["control"],
+    )
+
+    router = ContractRouter()
+    router.queued_responses = [
+        ProviderResponse(
+            content="",
+            model="contract-model",
+            tool_calls=[
+                ToolCall(
+                    id="disabled-rest-call",
+                    name="destructive_demo",
+                    arguments={"target": "must-not-run"},
+                )
+            ],
+            finish_reason="tool_calls",
+        ),
+        ProviderResponse(
+            content="The disabled action was not executed.",
+            model="contract-model",
+            finish_reason="stop",
+        ),
+    ]
+    engine = HermesAgentEngine(router=router)
+    client = TestClient(
+        create_app(
+            engine=engine,
+            registry=registry,
+            ui_state_path=tmp_path / "ui_state.json",
+            ui_dist_path=tmp_path / "missing-dist",
+        )
+    )
+
+    disabled = client.post("/api/tools/destructive_demo/enabled", json={"enabled": False})
+    assert disabled.status_code == 200
+    response = client.post("/api/chat", json={"prompt": "Run the test action."})
+
+    assert response.status_code == 200, response.text
+    assert executions == [], "REST chat must not bypass disabled tool state."
+    tool_messages = [
+        item.get("content", "")
+        for item in response.json()["messages"]
+        if item.get("role") == "tool"
+    ]
+    assert any("[TOOL_NOT_AVAILABLE: destructive_demo]" in value for value in tool_messages)
