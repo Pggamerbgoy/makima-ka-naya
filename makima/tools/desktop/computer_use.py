@@ -28,8 +28,32 @@ logger = logging.getLogger(__name__)
 
 @tool(
     name="computer_use",
-    description="Unified SOTA Computer Control interface (Astra / OSWorld / Anthropic compatible). Control mouse, keyboard, screen capture, and visual Set-of-Marks grounding with a single tool call.",
+    description=(
+        "High-level native desktop UI action using coordinates or Set-of-Marks IDs. Supports click, move, drag, type, "
+        "hotkey, scroll, screenshot, and visual grounding in one call."
+    ),
     tags=["desktop", "computer_use", "automation", "gui", "vision"],
+    purpose="Perform one concrete mouse/keyboard/screenshot action in a native desktop interface.",
+    capabilities=[
+        "Act on a physical desktop using screen coordinates or recent Set-of-Marks IDs.",
+        "Capture a screen/window or annotate controls before choosing a visual target.",
+        "Type text or send keyboard shortcuts to the foreground desktop application.",
+    ],
+    use_when=[
+        "The requested action targets native desktop UI and the target is identified visually by coordinates or a recent mark ID.",
+        "A screenshot or visual mark annotation is needed to locate the next UI action.",
+    ],
+    avoid_when=[
+        "The target is a web page in the persistent browser; use browser_interact.",
+        "A native application exposes a named UIA control that can be addressed semantically; prefer the UI Automation tools.",
+        "The user asks to launch/close an app, control media playback, or change system volume rather than interact with UI controls.",
+    ],
+    examples=[
+        "Click the visible button at a supplied coordinate.",
+        "Capture a screenshot and click a recent Set-of-Marks ID.",
+        "Type text into the currently focused native application.",
+    ],
+    side_effect="Sends real mouse/keyboard input or captures the desktop; actions may change application state.",
 )
 def computer_use(
     action: str,
