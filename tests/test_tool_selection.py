@@ -847,3 +847,58 @@ async def test_default_catalogue_uses_high_recall_shortlist_without_sending_ever
     assert selection_config.minimum_candidates <= len(selected) <= selection_config.max_candidates
     assert len(selected) < len(all_schemas)
     assert any(item["function"]["name"] == "close_application" for item in selected)
+
+
+
+@pytest.mark.asyncio
+async def test_primary_tool_failure_exposes_registered_fallback_on_next_turn() -> None:
+    registry = ToolRegistry(name="fallback-recovery-test")
+    executed: list[str] = []
+
+    def primary_lookup(query: str) -> dict[str, Any]:
+        executed.append("primary_lookup")
+        return {"success": False, "error": "Primary fetch provider is unavailable.", "query": query}
+
+    def fallback_lookup(query: str) -> dict[str, Any]:
+        executed.append("fallback_lookup")
+        return {"success": True, "text": f"Fetched using fallback: {query}"}
+
+    registry.register(primary_lookup, name="primary_lookup", tags=["web", "fetch"])
+    registry.register(
+        fallback_lookup,
+        name="fallback_lookup",
+        tags=["web", "fetch"],
+        fallback_for="primary_lookup",
+    )
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="primary-call", name="primary_lookup", arguments={"query": "https://example.com"})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="fallback-call", name="fallback_lookup", arguments={"query": "https://example.com"})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="The page was read with the fallback.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(
+        router=router,
+        enable_implicit_learning=False,
+        max_turns=5,
+    )
+
+    result = await engine.run(
+        prompt="Read https://example.com",
+        tools=registry,
+    )
+
+    first_names = {item["function"]["name"] for item in router.calls[0]["tools"]}
+    second_names = {item["function"]["name"] for item in router.calls[1]["tools"]}
+    assert first_names == {"primary_lookup"}
+    assert second_names == {"primary_lookup", "fallback_lookup"}
+    assert executed == ["primary_lookup", "fallback_lookup"]
+    assert result.completed is True
