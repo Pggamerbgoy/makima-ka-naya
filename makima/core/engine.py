@@ -8,7 +8,6 @@ Zero-Hardcoding Guarantee: Fully decoupled from model vendors, tool registries, 
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import inspect
 import json
@@ -316,78 +315,6 @@ class HermesAgentEngine:
         if not text:
             return ""
         return re.sub(r"\[Executed Tools in Turn:.*?\]", "", text, flags=re.DOTALL).strip()
-
-    @classmethod
-    def _extract_spoofed_tool_calls(
-        cls, text: Optional[str], available_tools: Optional[List[Dict[str, Any]]] = None
-    ) -> List[ToolCall]:
-        """
-        Detects when an LLM hallucinated/faked tool execution traces in plain conversational text
-        (e.g. '[Executed Tools in Turn: browser_interact(action="navigate", url="...") -> ok]')
-        instead of emitting a structured API tool_call. Parses and converts them into real ToolCalls.
-        """
-        if not text or "[Executed Tools in Turn:" not in text:
-            return []
-
-        match = re.search(r"\[Executed Tools in Turn:\s*(.*?)\]", text, re.DOTALL)
-        if not match:
-            return []
-
-        inner = match.group(1).strip()
-        raw_items = [item.strip() for item in re.split(r";|\n", inner) if item.strip()]
-
-        valid_tool_names: Set[str] = set()
-        if available_tools:
-            for t in available_tools:
-                if isinstance(t, dict):
-                    fn = t.get("function") if isinstance(t.get("function"), dict) else t
-                    name = fn.get("name") if isinstance(fn, dict) else str(t.get("name", ""))
-                    if name:
-                        valid_tool_names.add(name)
-
-        extracted_calls: List[ToolCall] = []
-        for item in raw_items:
-            item_match = re.match(r"^([a-zA-Z0-9_]+)\s*\((.*?)\)(?:\s*->.*)?$", item)
-            if not item_match:
-                continue
-
-            tool_name = item_match.group(1)
-            raw_args = item_match.group(2).strip()
-
-            if valid_tool_names and tool_name not in valid_tool_names:
-                continue
-
-            parsed_args: Dict[str, Any] = {}
-            if raw_args:
-                try:
-                    tree = ast.parse(f"call({raw_args})")
-                    for kw in tree.body[0].value.keywords:
-                        parsed_args[kw.arg] = ast.literal_eval(kw.value)
-                except Exception:
-                    matches = re.findall(
-                        r"([a-zA-Z0-9_]+)\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|([0-9.]+)|(True|False|None))",
-                        raw_args,
-                    )
-                    for k, v1, v2, v3, v4 in matches:
-                        if v1:
-                            parsed_args[k] = v1
-                        elif v2:
-                            parsed_args[k] = v2
-                        elif v3:
-                            parsed_args[k] = float(v3) if "." in v3 else int(v3)
-                        elif v4:
-                            parsed_args[k] = True if v4 == "True" else (False if v4 == "False" else None)
-
-            call_id = f"call_intercept_{int(time.time() * 1000)}_{len(extracted_calls)}"
-            extracted_calls.append(
-                ToolCall(
-                    id=call_id,
-                    name=tool_name,
-                    arguments=parsed_args,
-                )
-            )
-
-        return extracted_calls
 
     async def _execute_tool_call(
         self,
@@ -920,6 +847,9 @@ class HermesAgentEngine:
         consecutive_identical_batches = 0
         signature_history: List[str] = []
         force_synthesis_next_turn = False
+        # If semantic retrieval hides a real registered tool that the model then requests,
+        # expose the full live catalogue on the next turn so it can choose with full schemas.
+        force_full_tool_catalog_next_turn = False
 
         # Hermes Autonomous While-Loop
         while turn < limit_turns:
@@ -972,7 +902,14 @@ class HermesAgentEngine:
 
             # 2. Query provider along Pareto frontier with automatic failover
             active_tools_for_turn = tool_catalog_schemas
-            if active_tools_for_turn:
+            if active_tools_for_turn and force_full_tool_catalog_next_turn:
+                # A previous structured request named a registered tool excluded by retrieval.
+                # This is the recovery path: do not ask the same selector to hide it again.
+                logger.warning(
+                    "Expanding tool schemas from semantic subset to full catalogue after a hidden-tool request."
+                )
+                force_full_tool_catalog_next_turn = False
+            elif active_tools_for_turn:
                 selection_context = self._tool_selection_context(prompt, working_messages)
                 active_tools_for_turn = await self.tool_selector.select_schemas(
                     tool_catalog_schemas,
@@ -1049,21 +986,26 @@ class HermesAgentEngine:
                 if inspect.isawaitable(cb_res):
                     await cb_res
 
-            # Intercept hallucinated/spoofed tool traces in raw conversational text
-            if not response.tool_calls and response.content and "[Executed Tools in Turn:" in response.content and turn < limit_turns:
-                spoofed_calls = self._extract_spoofed_tool_calls(response.content, active_tools_for_turn)
-                if spoofed_calls:
-                    logger.warning(
-                        "Intercepted %d hallucinated/spoofed tool call(s) in turn %d raw text; converting to real tool calls: %s",
-                        len(spoofed_calls),
-                        turn,
-                        [tc.name for tc in spoofed_calls],
+            # Plain-text tool traces are untrusted model output, never executable actions.
+            # Only provider-native structured tool_calls may reach dispatch.
+            if not response.tool_calls and response.content and "[Executed Tools in Turn:" in response.content:
+                logger.warning(
+                    "Ignored a plain-text tool execution trace in turn %d; no structured tool call was returned.",
+                    turn,
+                )
+                clean_content = self._strip_spoofed_tool_traces(response.content)
+                if clean_content:
+                    response.content = (
+                        clean_content
+                        + "\n\n[No action was executed: the model returned a plain-text tool trace, "
+                        "not a structured tool call.]"
                     )
-                    clean_content = self._strip_spoofed_tool_traces(response.content or "")
-                    response.content = clean_content
-                    response.tool_calls = spoofed_calls
-                    assistant_msg.content = clean_content
-                    assistant_msg.tool_calls = spoofed_calls
+                else:
+                    response.content = (
+                        "No action was executed because the model returned a plain-text tool trace "
+                        "instead of a structured tool call."
+                    )
+                assistant_msg.content = response.content
 
             # Finalize only when the provider returned no structured tool calls.
             if not response.tool_calls:
@@ -1134,11 +1076,16 @@ class HermesAgentEngine:
 
             # 5. Dispatch requested tool calls with intelligent parallel batching
             def _is_call_parallel_safe(call_name: str) -> bool:
-                if tools is not None and hasattr(tools, "is_parallel_safe") and callable(tools.is_parallel_safe):
-                    try:
-                        return bool(tools.is_parallel_safe(call_name))
-                    except Exception:
-                        pass
+                # Never borrow safety metadata from the global registry when a caller
+                # supplied a different schema set or custom executor. Unknown defaults
+                # to sequential execution.
+                if tools is not None:
+                    if hasattr(tools, "is_parallel_safe") and callable(tools.is_parallel_safe):
+                        try:
+                            return bool(tools.is_parallel_safe(call_name))
+                        except Exception as exc:
+                            logger.debug("Tool parallel-safety lookup failed for %s: %s", call_name, exc)
+                    return False
                 try:
                     from makima.tools import get_registry
                     reg = get_registry()
@@ -1148,9 +1095,10 @@ class HermesAgentEngine:
                     pass
                 return False
 
-            active_tool_names: Optional[Set[str]] = None
+            # An empty set means this turn exposed no callable tools. Never use None here:
+            # None in _execute_tool_call intentionally means "no allowlist supplied".
+            active_tool_names: Set[str] = set()
             if active_tools_for_turn is not None:
-                active_tool_names = set()
                 for schema in active_tools_for_turn:
                     if not isinstance(schema, dict):
                         continue
@@ -1162,6 +1110,36 @@ class HermesAgentEngine:
                     )
                     if candidate_name:
                         active_tool_names.add(str(candidate_name))
+
+            def _canonical_tool_name(name: str) -> str:
+                return name.split(":")[-1] if ":" in name else name
+
+            full_catalog_names: Set[str] = set()
+            for schema in tool_catalog_schemas or []:
+                if not isinstance(schema, dict):
+                    continue
+                function_schema = schema.get("function")
+                candidate_name = (
+                    function_schema.get("name")
+                    if isinstance(function_schema, dict)
+                    else schema.get("name")
+                )
+                if candidate_name:
+                    full_catalog_names.add(str(candidate_name))
+
+            hidden_registered_calls = {
+                _canonical_tool_name(call.name)
+                for call in response.tool_calls
+                if _canonical_tool_name(call.name) in full_catalog_names
+                and _canonical_tool_name(call.name) not in active_tool_names
+            }
+            if hidden_registered_calls:
+                force_full_tool_catalog_next_turn = True
+                logger.warning(
+                    "Model requested registered tools omitted by semantic retrieval: %s. "
+                    "The calls are blocked for this turn; the full catalogue will be exposed next turn.",
+                    sorted(hidden_registered_calls),
+                )
 
             batches: List[Tuple[bool, List[Tuple[int, ToolCall]]]] = []
             curr_items: List[Tuple[int, ToolCall]] = []
