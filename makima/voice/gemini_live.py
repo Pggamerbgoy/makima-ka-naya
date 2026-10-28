@@ -16,6 +16,7 @@ from google.genai import types
 from makima.config import get_settings
 from makima.tools.registry import get_registry
 from makima.tools.selection import ToolExecutionGateway
+from makima.core.tool_selection_policy import TOOL_SELECTION_GUIDANCE
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,9 @@ DEFAULT_VOICE_SYSTEM_INSTRUCTION = (
     "- For online anime/video viewing, use browser_interact. Prefer the explicitly requested website; otherwise honor the user's saved streaming-site preference (for example, Miruro when saved in memory). Search the title and select the requested episode.\n"
     "- Do not default anime/video requests to YouTube unless the user explicitly requests YouTube or it is the saved preference for that request. Do not claim playback began unless the tool result verifies it."
 )
+
+# Keep voice tool-choice guidance aligned with the regular chat engine.
+DEFAULT_VOICE_SYSTEM_INSTRUCTION = DEFAULT_VOICE_SYSTEM_INSTRUCTION + "\n\n" + TOOL_SELECTION_GUIDANCE
 
 
 class GeminiLiveSession:
