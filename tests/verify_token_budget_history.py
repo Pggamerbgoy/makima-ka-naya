@@ -25,6 +25,7 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from makima.core import HermesAgentEngine
+from makima.core.context import ContextCompressor
 from makima.memory.episodic import EpisodicMemory
 from makima.provider.adapters.base import BaseProvider, Message, ProviderResponse, ToolCall
 from makima.provider.router import ParetoCandidate, ParetoRouter
@@ -88,8 +89,14 @@ async def test_1_budget_calculation():
         current_prompt="Hello",
         tool_schemas=[{"name": "test_tool", "parameters": {}}],
     )
-    # Gemini 1M should be capped at 400,000 for safe network transport
-    assert budget_1m == 400_000, f"Expected 400,000 budget cap for 1M model, got {budget_1m}"
+    # No hidden 400K cap: after fixed reserves, the remaining 1M context is available.
+    assert 800_000 < budget_1m < 1_000_000, f"Expected most of the 1M window to be available, got {budget_1m}"
+    explicitly_capped = gemini_engine._calculate_history_token_budget(
+        system_prompt="Short prompt",
+        current_prompt="Hello",
+        max_allowed_history=400_000,
+    )
+    assert explicitly_capped == 400_000, "Explicit operational history cap should still be honored"
     
     # 2. 200K Context Model (Claude 3.5 Sonnet)
     claude_engine = HermesAgentEngine(router=DummyRouter(DummyProvider("claude-3-5-sonnet-20241022")))
@@ -131,9 +138,9 @@ async def test_2_break_100_message_limit():
         await episodic.connect()
         
         session_id = "session_large_history"
-        # Seed 250 turns (125 user messages + 125 assistant messages)
-        # Total tokens will be ~125 * (15 + 25) = ~5,000 tokens
-        for i in range(125):
+        # Seed 300 user/assistant turns (600 rows) to cross multiple DB fetch batches.
+        # Total tokens remain small relative to the generous history budget.
+        for i in range(300):
             await episodic.store_turn(
                 session_id=session_id,
                 role="user",
@@ -149,24 +156,24 @@ async def test_2_break_100_message_limit():
         legacy_messages = await episodic.get_recent_messages(session_id=session_id, limit=100)
         assert len(legacy_messages) == 100, f"Legacy limit=100 should return 100, got {len(legacy_messages)}"
         
-        # Verify token-budget loader with generous budget loads ALL 250 messages!
+        # Verify token-budget loader with generous budget loads ALL 600 messages!
         budget_messages = await episodic.get_recent_messages(
             session_id=session_id,
             max_tokens=50_000,  # Generous budget
         )
-        assert len(budget_messages) == 250, (
-            f"Expected all 250 messages to be loaded with token budget, got {len(budget_messages)}"
+        assert len(budget_messages) == 600, (
+            f"Expected all 600 messages to be loaded with token budget, got {len(budget_messages)}"
         )
         
         # Verify ordering is chronological: first message is turn 0, last is turn 124
         assert "detail item 0" in budget_messages[0].content
-        assert "detail item 124" in budget_messages[-1].content
+        assert "detail item 299" in budget_messages[-1].content
         
         # Allow background persistence task to finish before closing
         await asyncio.sleep(0.05)
         await episodic.close()
         
-    print("  -> PASSED: Token budget broke the fixed 100-message limit, retrieving all 250 messages chronologically!")
+    print("  -> PASSED: Token-budget loader retrieved all 600 messages across DB batches, chronologically!")
 
 
 async def test_3_constrained_budget_backward_accumulation():
@@ -202,9 +209,11 @@ async def test_3_constrained_budget_backward_accumulation():
         last_msg = recent_messages[-1]
         assert "049" in last_msg.content, f"Expected most recent turn (049) to be present, got: {last_msg.content}"
         
-        # Chronological integrity check: Messages in recent_messages must be in ascending order
-        for idx in range(len(recent_messages) - 1):
-            assert recent_messages[idx].content < recent_messages[idx + 1].content or True
+        # Chronological integrity check: sequence numbers must never move backwards.
+        import re
+        sequence_numbers = [int(match.group(1)) for msg in recent_messages
+                            if (match := re.search(r"(?:Question|Answer) (\d{3})", msg.content or ""))]
+        assert sequence_numbers == sorted(sequence_numbers), "Loaded history is not chronological"
             
         # Allow background persistence task to finish before closing
         await asyncio.sleep(0.05)
@@ -387,6 +396,55 @@ async def test_5_runtime_wiring_and_engine_rehydration():
     print("  -> PASSED: load_session_messages wiring and HermesAgentEngine end-to-end rehydration verified!")
 
 
+
+
+async def test_6_persistence_survives_history_compression():
+    print("[TEST 6] Testing persistence ledger when working history is compressed...")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        episodic = EpisodicMemory(db_path=Path(tmpdir) / "persistence_after_compression.db")
+        await episodic.connect()
+        provider = DummyProvider("gemini-2.5-flash")
+        engine = HermesAgentEngine(
+            router=DummyRouter(provider),
+            episodic_memory=episodic,
+            compressor=ContextCompressor(max_tokens=80, threshold_ratio=0.5, head_turns=2, tail_turns=8),
+        )
+
+        supplied_history: List[Message] = []
+        for i in range(30):
+            role = "user" if i % 2 == 0 else "assistant"
+            supplied_history.append(Message(role=role, content=f"Old context item {i}: " + ("detail " * 12)))
+
+        result = await engine.run(
+            prompt="CURRENT_RUN_PROMPT_THAT_MUST_BE_PERSISTED",
+            messages=supplied_history,
+            system_prompt="short test system prompt",
+            session_id="compression_persistence",
+        )
+        assert result.completed is True
+        assert any(
+            m.role == "system" and "[CONTEXT COMPRESSED:" in (m.content or "")
+            for m in result.messages
+        ), "The fixture did not trigger context compression."
+
+        saved_turns: List[Dict[str, Any]] = []
+        for _ in range(30):
+            await asyncio.sleep(0.1)
+            saved_turns = await episodic.get_recent_turns(
+                session_id="compression_persistence", limit=10, order="asc"
+            )
+            if len(saved_turns) >= 2:
+                break
+
+        assert [turn["role"] for turn in saved_turns] == ["user", "assistant"], (
+            f"Expected only this run's user+assistant turns to be persisted, got {[t['role'] for t in saved_turns]}"
+        )
+        assert "CURRENT_RUN_PROMPT_THAT_MUST_BE_PERSISTED" in saved_turns[0]["content"]
+        assert "Dummy response" in saved_turns[1]["content"]
+        await episodic.close()
+    print("  -> PASSED: Current-run messages persisted even after the working history was compressed!")
+
+
 async def main():
     print("=" * 60)
     print("RUNNING LIVE VERIFICATION: Model-Aware Token-Budget History Loading")
@@ -397,6 +455,7 @@ async def main():
     await test_3_constrained_budget_backward_accumulation()
     await test_4_atomic_tool_pair_preservation()
     await test_5_runtime_wiring_and_engine_rehydration()
+    await test_6_persistence_survives_history_compression()
     
     print("=" * 60)
     print("ALL TOKEN-BUDGET HISTORY LOADING CHECKS PASSED! (EXIT CODE 0)")
