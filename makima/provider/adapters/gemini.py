@@ -213,6 +213,7 @@ class GeminiProvider(BaseProvider):
         self._active_cache_name: Optional[str] = None
         self._active_cache_expiry: float = 0.0
         self._last_cache_fallback_reason: Optional[str] = None
+        self._context_cache_supported: bool = True
         self.cache_manager = get_cache_manager()
         self.cache_strategy = CacheStrategy.EXPLICIT_GENAI
 
@@ -370,6 +371,9 @@ class GeminiProvider(BaseProvider):
         Returns the cached_content identifier (e.g. 'cachedContents/abc123xyz')
         or None if caching is not applicable, below minimum token floor, or fails.
         """
+        if not self._context_cache_supported:
+            return None
+
         if not gemini_tools and not system_prompt:
             return None
 
@@ -414,10 +418,60 @@ class GeminiProvider(BaseProvider):
                 logger.info("Created Gemini KV Context Cache '%s' for model %s (saving ~11k+ tokens/turn)", cache_name, self.config.model)
                 return cache_name
         except Exception as exc:
-            self._last_cache_fallback_reason = str(exc)
-            logger.info("Gemini KV Context Caching fallback to standard prompt for model %s: %s", self.config.model, exc)
+            err_msg = str(exc)
+            err_lower = err_msg.lower()
+            self._last_cache_fallback_reason = err_msg
+            if any(w in err_lower for w in ("minimum", "token", "insufficient", "32768", "not supported", "unsupported")):
+                self._context_cache_supported = False
+                logger.warning(
+                    "Disabling Gemini KV Context Caching for model %s due to threshold/support error: %s",
+                    self.config.model,
+                    err_msg,
+                )
+            else:
+                logger.info("Gemini KV Context Caching fallback to standard prompt for model %s: %s", self.config.model, exc)
 
         return None
+
+    @staticmethod
+    def _resolve_thinking_config(kwargs: Dict[str, Any]) -> Optional[types.ThinkingConfig]:
+        """Resolves thinking_budget for Gemini thinking models (-1 for on, 0 for off)."""
+        enable_thinking = kwargs.get("enable_thinking")
+        if enable_thinking is not None:
+            return types.ThinkingConfig(thinking_budget=-1 if enable_thinking else 0)
+        return None
+
+    @staticmethod
+    def _build_generate_config(
+        cached_content_name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        gemini_tools: Optional[List[types.Tool]] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        tool_config: Optional[types.ToolConfig] = None,
+        thinking_config: Optional[types.ThinkingConfig] = None,
+    ) -> types.GenerateContentConfig:
+        """
+        Unified helper to construct types.GenerateContentConfig for both
+        generate() and stream() pathways, ensuring parity for context caching,
+        tool configuration, and thinking/CoT reasoning controls.
+        """
+        if cached_content_name:
+            return types.GenerateContentConfig(
+                cached_content=cached_content_name,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                tool_config=tool_config,
+                thinking_config=thinking_config,
+            )
+        return types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            tools=gemini_tools,
+            tool_config=tool_config,
+            thinking_config=thinking_config,
+        )
 
     def _is_live_model(self) -> bool:
         """Determines if target model requires bidiGenerateContent WebSocket connection."""
@@ -733,29 +787,16 @@ class GeminiProvider(BaseProvider):
                 gemini_tools=gemini_tools,
             )
 
-            enable_thinking = kwargs.get("enable_thinking")
-            thinking_config: Optional[types.ThinkingConfig] = None
-            if enable_thinking is not None:
-                # thinking_budget=-1 enables dynamic CoT reasoning; 0 explicitly turns it off
-                thinking_config = types.ThinkingConfig(thinking_budget=-1 if enable_thinking else 0)
-
-            if cached_content_name:
-                config = types.GenerateContentConfig(
-                    cached_content=cached_content_name,
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    tool_config=tool_config,
-                    thinking_config=thinking_config,
-                )
-            else:
-                config = types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    tools=gemini_tools,
-                    tool_config=tool_config,
-                    thinking_config=thinking_config,
-                )
+            thinking_config = self._resolve_thinking_config(kwargs)
+            config = self._build_generate_config(
+                cached_content_name=cached_content_name,
+                system_prompt=system_prompt,
+                gemini_tools=gemini_tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tool_config=tool_config,
+                thinking_config=thinking_config,
+            )
 
             try:
                 response = await client.aio.models.generate_content(
@@ -769,11 +810,12 @@ class GeminiProvider(BaseProvider):
                     logger.warning("Gemini context cache %s expired or evicted; retrying with direct prompt: %s", cached_content_name, gen_err)
                     self._active_cache_name = None
                     self._active_cache_key = None
-                    config = types.GenerateContentConfig(
-                        system_instruction=system_prompt,
+                    config = self._build_generate_config(
+                        cached_content_name=None,
+                        system_prompt=system_prompt,
+                        gemini_tools=gemini_tools,
                         temperature=temperature,
-                        max_output_tokens=max_tokens,
-                        tools=gemini_tools,
+                        max_tokens=max_tokens,
                         tool_config=tool_config,
                         thinking_config=thinking_config,
                     )
@@ -914,27 +956,53 @@ class GeminiProvider(BaseProvider):
                 gemini_tools=gemini_tools,
             )
 
-            if cached_content_name:
-                config = types.GenerateContentConfig(
-                    cached_content=cached_content_name,
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    tool_config=tool_config,
-                )
-            else:
-                config = types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    tools=gemini_tools,
-                    tool_config=tool_config,
-                )
-
-            stream = await client.aio.models.generate_content_stream(
-                model=self.config.model,
-                contents=contents,
-                config=config,
+            thinking_config = self._resolve_thinking_config(kwargs)
+            config = self._build_generate_config(
+                cached_content_name=cached_content_name,
+                system_prompt=system_prompt,
+                gemini_tools=gemini_tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tool_config=tool_config,
+                thinking_config=thinking_config,
             )
+
+            try:
+                stream = await client.aio.models.generate_content_stream(
+                    model=self.config.model,
+                    contents=contents,
+                    config=config,
+                )
+            except Exception as stream_err:
+                err_str = str(stream_err).lower()
+                if cached_content_name and any(k in err_str for k in ("not found", "404", "cachedcontent", "cached_content")):
+                    logger.warning("Gemini context cache %s expired during stream; retrying with direct prompt: %s", cached_content_name, stream_err)
+                    self._active_cache_name = None
+                    self._active_cache_key = None
+                    config = self._build_generate_config(
+                        cached_content_name=None,
+                        system_prompt=system_prompt,
+                        gemini_tools=gemini_tools,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        tool_config=tool_config,
+                        thinking_config=thinking_config,
+                    )
+                    stream = await client.aio.models.generate_content_stream(
+                        model=self.config.model,
+                        contents=contents,
+                        config=config,
+                    )
+                elif thinking_config is not None and "thinking" in err_str:
+                    logger.warning("Gemini thinking_config not supported by %s during stream; retrying without thinking: %s", self.config.model, stream_err)
+                    config.thinking_config = None
+                    stream = await client.aio.models.generate_content_stream(
+                        model=self.config.model,
+                        contents=contents,
+                        config=config,
+                    )
+                else:
+                    raise
 
             async for chunk in stream:
                 text_delta = ""

@@ -606,3 +606,23 @@
 - **Verification**:
   - `tests/verify_token_budget_history.py`: All 5 live test suites passed with exit code 0 (Dynamic budget calculus, >100 message loading [250 messages verified], constrained budget backward accumulation, atomic tool pair preservation with zero orphaned tools, and runtime wiring/e2e rehydration).
   - All existing suites passed (`verify_engine_memory.py`, `verify_memory.py`, `verify_engine.py`, `verify_cache_audit.py`, `verify_providers.py`).
+
+---
+
+### Entry 23: Gemini Stream Thinking Parity, Context Cache Auto-Disable & Skills Partition Hardening (2026-10-28)
+- **Context & Bug Audits**:
+  1. `GeminiProvider._get_or_create_context_cache()` re-attempted failing API calls on every request when a prompt was below Google's 32k threshold, causing repeat latency spikes and log noise.
+  2. `GeminiProvider.stream()` lacked `thinking_config`, causing dynamic reasoning to silently disable during streaming turns even when `thinking_mode="on"`.
+  3. `HermesAgentEngine._build_skills_context()` emitted unwrapped markdown (`## Available Skills`), causing prompt partitioning to fail when memory was empty and misplacing Anthropic cache breakpoints.
+  4. `HermesAgentEngine.run()` permitted stray tool execution when `active_tools_for_turn` was `None` (force synthesis) due to `active_tool_names` falling back to `None`.
+- **Architectural Solution**:
+  - `makima/provider/adapters/gemini.py`:
+    - Added `_context_cache_supported` flag (default `True`). If API throws threshold/insufficient tokens error, flag is toggled to `False` with warning log, bypassing subsequent API calls permanently for the instance.
+    - Added unified helper `_build_generate_config()` and `_resolve_thinking_config()`, achieving complete parity between `generate()` and `stream()` for `cached_content`, tools, and thinking configs.
+  - `makima/core/engine.py` & `makima/provider/cache.py`:
+    - Wrapped injected skills context in `<skills>\n...\n</skills>` and registered markdown headers in `dynamic_markers`, guaranteeing prompt partitioner always separates query-dependent skills from static base prompt.
+    - Scoped `active_tool_names` to minimum empty `set()` whenever `tool_catalog_schemas` are present, strictly blocking any tool execution during force synthesis turns.
+- **Verification**:
+  - `tests/verify_cache_audit.py`: All 6 suites passed (exit code 0) verifying skills-only partition, cache failure auto-disable, and stream thinking configuration.
+  - `tests/verify_engine.py`: All 8 suites passed (exit code 0).
+  - `tests/verify_token_budget_history.py`: All 5 suites passed (exit code 0).

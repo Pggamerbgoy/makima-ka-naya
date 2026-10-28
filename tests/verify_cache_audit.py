@@ -71,6 +71,18 @@ def test_1_memory_and_skills_partitioning():
     assert "cache_control" not in system_block["content"][1]
     assert memory_section in system_block["content"][1]["text"]
 
+    # 4. Base + Skills ONLY (memory context is empty)
+    skills_only_prompt = f"{base_instructions}\n\n---\n\n<skills>\n## Available Skills\n- browser\n</skills>"
+    prefix_skills, suffix_skills = partition_system_prompt(skills_only_prompt)
+    assert prefix_skills == base_instructions, f"Skills-only prefix failed: '{prefix_skills}'"
+    assert "Available Skills" in suffix_skills
+
+    # 5. Raw markdown '## Available Skills' without tags (defense-in-depth marker test)
+    raw_skills_prompt = f"{base_instructions}\n\n---\n\n## Available Skills\n- browser"
+    prefix_raw, suffix_raw = partition_system_prompt(raw_skills_prompt)
+    assert prefix_raw == base_instructions, f"Raw skills prefix failed: '{prefix_raw}'"
+    assert "## Available Skills" in suffix_raw
+
     print("  -> PASSED: Dynamic memory and skills properly partitioned into dynamic_suffix!")
 
 
@@ -200,8 +212,30 @@ def test_4_gemini_fallback_observability_and_cache_key():
     assert cache_id is None
     assert provider._last_cache_fallback_reason is not None
     assert "threshold" in provider._last_cache_fallback_reason
+    # Verify flag was disabled to prevent repeating failing API calls
+    assert provider._context_cache_supported is False
 
-    print("  -> PASSED: Gemini key is parameter-sensitive and fallback reason is observable!")
+    # 3. Test repeat call skips API hit entirely due to _context_cache_supported = False
+    cache_id_repeat = asyncio.run(provider._get_or_create_context_cache("System prompt", res_b))
+    assert cache_id_repeat is None
+    assert mock_client.aio.caches.create.call_count == 1  # Never called again!
+
+    # 4. Test thinking config helper parity across generate and stream
+    cfg_thinking_on = provider._build_generate_config(
+        temperature=0.2,
+        thinking_config=provider._resolve_thinking_config({"enable_thinking": True}),
+    )
+    assert cfg_thinking_on.thinking_config is not None
+    assert cfg_thinking_on.thinking_config.thinking_budget == -1
+
+    cfg_thinking_off = provider._build_generate_config(
+        temperature=0.2,
+        thinking_config=provider._resolve_thinking_config({"enable_thinking": False}),
+    )
+    assert cfg_thinking_off.thinking_config is not None
+    assert cfg_thinking_off.thinking_config.thinking_budget == 0
+
+    print("  -> PASSED: Gemini key is parameter-sensitive, threshold failure disables retry, and stream thinking is verified!")
 
 
 def test_5_metrics_token_savings_accounting():

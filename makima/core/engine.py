@@ -604,9 +604,11 @@ class HermesAgentEngine:
                                 matching.append(m)
             # F1.1: Only inject skills that genuinely match the prompt; avoid injecting arbitrary fallback skills
             if matching:
-                return await asyncio.to_thread(
+                raw_skills = await asyncio.to_thread(
                     self.skills_loader.build_system_prompt_section, matching, 1000
                 )
+                if raw_skills:
+                    return f"<skills>\n{raw_skills}\n</skills>"
         except Exception as e:
             logger.debug(f"SkillsLoader injection skipped: {e}")
         return ""
@@ -775,7 +777,12 @@ class HermesAgentEngine:
         if memory_context:
             effective_system_prompt = effective_system_prompt + "\n\n---\n\n" + memory_context
         if skills_section:
-            effective_system_prompt = effective_system_prompt + "\n\n---\n\n" + skills_section
+            wrapped_skills = (
+                skills_section
+                if skills_section.strip().startswith("<skills>")
+                else f"<skills>\n{skills_section}\n</skills>"
+            )
+            effective_system_prompt = effective_system_prompt + "\n\n---\n\n" + wrapped_skills
 
         # Resolve the complete currently enabled tool catalogue once for this request.
         # Done before history loading so tool schemas can be deducted from the token budget.
@@ -1148,9 +1155,12 @@ class HermesAgentEngine:
                     pass
                 return False
 
-            active_tool_names: Optional[Set[str]] = None
-            if active_tools_for_turn is not None:
-                active_tool_names = set()
+            # If tool catalog schemas exist, minimum allowed is empty set (blocking stray calls in force-synthesis).
+            # If tools were never configured at all, active_tool_names is None (skipping registry validation).
+            active_tool_names: Optional[Set[str]] = set() if tool_catalog_schemas is not None else None
+            if active_tools_for_turn:
+                if active_tool_names is None:
+                    active_tool_names = set()
                 for schema in active_tools_for_turn:
                     if not isinstance(schema, dict):
                         continue

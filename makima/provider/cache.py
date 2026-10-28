@@ -178,6 +178,8 @@ def partition_system_prompt(system_prompt: Optional[str]) -> Tuple[str, str]:
         "<memory\n",
         "<skills>",
         "<skills\n",
+        "## Available Skills",
+        "## Active Skills",
         "<active",
         "<dynamic",
         "<turn_",
