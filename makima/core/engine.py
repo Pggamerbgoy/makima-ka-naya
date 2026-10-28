@@ -1130,7 +1130,8 @@ class HermesAgentEngine:
             hidden_registered_calls = {
                 _canonical_tool_name(call.name)
                 for call in response.tool_calls
-                if _canonical_tool_name(call.name) in full_catalog_names
+                if active_tools_for_turn is not None
+                and _canonical_tool_name(call.name) in full_catalog_names
                 and _canonical_tool_name(call.name) not in active_tool_names
             }
             if hidden_registered_calls:
