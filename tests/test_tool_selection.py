@@ -648,3 +648,88 @@ async def test_fallback_tool_schema_is_hidden_only_when_primary_is_available() -
     )
     fallback_schemas = disabled_primary_gateway.get_schemas()
     assert [item["function"]["name"] for item in fallback_schemas] == ["fallback_lookup"]
+
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_stream_preserves_fragmented_tool_calls(monkeypatch: Any) -> None:
+    from makima.provider.adapters.openai_compatible import OpenAICompatibleProvider
+
+    class AsyncChunks:
+        def __init__(self, chunks: list[Any]) -> None:
+            self.chunks = chunks
+
+        def __aiter__(self):
+            self._iterator = iter(self.chunks)
+            return self
+
+        async def __anext__(self) -> Any:
+            try:
+                return next(self._iterator)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    first_delta = SimpleNamespace(
+        content="Checking now.",
+        tool_calls=[
+            SimpleNamespace(
+                index=0,
+                id="call-stream-1",
+                function=SimpleNamespace(name="set_volume", arguments='{"percent":'),
+            )
+        ],
+    )
+    second_delta = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            SimpleNamespace(
+                index=0,
+                id=None,
+                function=SimpleNamespace(name=None, arguments="50}"),
+            )
+        ],
+    )
+    end_delta = SimpleNamespace(content=None, tool_calls=None)
+    chunks_in = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=first_delta, finish_reason=None)]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=second_delta, finish_reason=None)]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=end_delta, finish_reason="tool_calls")]),
+    ]
+
+    class FakeCompletions:
+        async def create(self, **_kwargs: Any) -> AsyncChunks:
+            return AsyncChunks(chunks_in)
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.config = SimpleNamespace(model="mock-model", base_url="https://api.openai.com/v1")
+    provider.cache_manager = SimpleNamespace(
+        extract_cached_tokens=lambda _usage: 0,
+        record_usage=lambda **_kwargs: None,
+    )
+    provider.cache_strategy = "none"
+
+    async def noop() -> None:
+        return None
+
+    monkeypatch.setattr(provider, "_before_call", noop)
+    monkeypatch.setattr(provider, "_on_success", noop)
+    monkeypatch.setattr(provider, "_on_failure", lambda _exc: noop())
+    monkeypatch.setattr(provider, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(provider, "_format_messages", lambda messages, system_prompt=None: [])
+    monkeypatch.setattr(provider, "_format_tools", lambda tools: tools)
+
+    streamed = [
+        chunk
+        async for chunk in provider.stream(
+            messages=[],
+            tools=[schema("set_volume", "Set master output volume.")],
+        )
+    ]
+
+    assert "".join(chunk.delta for chunk in streamed) == "Checking now."
+    calls = [call for chunk in streamed for call in (chunk.tool_calls or [])]
+    assert len(calls) == 1
+    assert calls[0].id == "call-stream-1"
+    assert calls[0].name == "set_volume"
+    assert calls[0].arguments == {"percent": 50}
