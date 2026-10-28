@@ -222,13 +222,6 @@ providers:
       latency_tier: "fast"
       context_limit: 1000000
 
-    gemini_3_8_live:
-      adapter: "gemini"
-      model: "gemini-3.8-live"
-      api_key_env: "GEMINI_API_KEY"
-      latency_tier: "fast"
-      context_limit: 1000000
-
     gemini_live:
       adapter: "gemini"
       model: "gemini-3.8-live"
