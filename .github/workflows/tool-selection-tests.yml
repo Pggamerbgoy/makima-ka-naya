@@ -21,8 +21,12 @@ jobs:
       - name: Install Makima and test dependencies
         run: python -m pip install -e ".[dev]"
       - name: Compile touched Python packages
-        run: python -m compileall -q makima tests/test_tool_selection.py tests/verify_token_budget_history.py
+        run: python -m compileall -q makima tests/test_tool_selection.py tests/verify_engine.py tests/verify_tool_registry.py tests/verify_token_budget_history.py
       - name: Run tool-selection regression tests
         run: python -m pytest -q tests/test_tool_selection.py
+      - name: Run engine wiring verification
+        run: python tests/verify_engine.py
+      - name: Run tool registry verification
+        run: python tests/verify_tool_registry.py
       - name: Run token-budget history regression tests
         run: python tests/verify_token_budget_history.py
