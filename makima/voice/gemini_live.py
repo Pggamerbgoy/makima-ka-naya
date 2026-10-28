@@ -265,7 +265,11 @@ class GeminiLiveSession:
         if not self._is_active or self._session is None:
             raise RuntimeError("Live session is not active.")
 
-        reg = get_registry()
+        # Use the exact gateway/registry whose schemas were exposed to Gemini.
+        # This preserves disabled-tool checks, per-session allowlists, and shared guardrails.
+        if self.execution_gateway is None:
+            self.execution_gateway = ToolExecutionGateway(get_registry())
+        gateway = self.execution_gateway
 
         async for response in self._session.receive():
             server_content = getattr(response, "server_content", None)
@@ -308,8 +312,13 @@ class GeminiLiveSession:
                         "call_id": getattr(fc, "id", None),
                     }
 
-                    # Execute tool via ToolRegistry
-                    result = await reg.execute(fn_name, fn_args)
+                    # Execute only tools declared for this live session through the
+                    # shared gateway. Direct registry execution bypasses disabled state and guardrails.
+                    result = await gateway.execute(
+                        fn_name,
+                        fn_args,
+                        allowed_tool_names=self._available_tool_names,
+                    )
                     yield {
                         "type": "tool_result",
                         "name": fn_name,
