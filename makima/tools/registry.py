@@ -843,17 +843,19 @@ class ToolRegistry:
     # Auto-Discovery Scanner
     # -----------------------------------------------------------------------
 
-    def _scan_module(self, mod: ModuleType) -> int:
-        """Inspects module attributes and registers decorated tools."""
+    def _scan_module(self, mod: ModuleType, *, replace_existing: bool = False) -> int:
+        """Register decorated tools; optionally replace stale implementations during reload."""
         count = 0
         for attr_name, attr_val in inspect.getmembers(mod):
             if callable(attr_val) and getattr(attr_val, "__makima_tool__", False):
                 tool_obj = getattr(attr_val, "__tool_obj__", None)
                 if tool_obj is None:
                     tool_obj = Tool.from_function(attr_val)
-                if tool_obj.name not in self._tools:
+                was_registered = tool_obj.name in self._tools
+                if not was_registered or replace_existing:
                     self.register_tool(tool_obj)
-                    count += 1
+                    if not was_registered:
+                        count += 1
         return count
 
     def discover(
@@ -884,8 +886,9 @@ class ToolRegistry:
 
             discovered_count = 0
 
-            # Scan the root module itself
-            discovered_count += self._scan_module(pkg)
+            # Scan the root module itself. An explicit reload must also refresh
+            # already-registered Tool objects, not merely import fresh Python code.
+            discovered_count += self._scan_module(pkg, replace_existing=reload)
 
             # If it's a package with __path__, traverse subpackages/submodules
             if hasattr(pkg, "__path__"):
@@ -897,8 +900,8 @@ class ToolRegistry:
                     try:
                         mod = importlib.import_module(module_info.name)
                         if reload:
-                            importlib.reload(mod)
-                        discovered_count += self._scan_module(mod)
+                            mod = importlib.reload(mod)
+                        discovered_count += self._scan_module(mod, replace_existing=reload)
                     except Exception as exc:
                         logger.warning("Error importing tool module '%s': %s", module_info.name, exc)
 
@@ -915,7 +918,7 @@ class ToolRegistry:
                         if mod_name not in sys.modules:
                             try:
                                 mod = importlib.import_module(mod_name)
-                                discovered_count += self._scan_module(mod)
+                                discovered_count += self._scan_module(mod, replace_existing=reload)
                             except Exception as exc:
                                 logger.warning("Error importing tool file '%s': %s", py_file, exc)
 
