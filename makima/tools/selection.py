@@ -255,6 +255,14 @@ class ToolExecutionGateway:
             or str(tool.fallback_for) not in available_names
         ]
 
+    def get_all_schemas(
+        self,
+        format: str = "openai",
+        tags: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all enabled schemas, including conditional fallbacks, for recovery turns."""
+        return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
+
     def is_parallel_safe(self, name: str) -> bool:
         if not self.is_enabled(name):
             return False
