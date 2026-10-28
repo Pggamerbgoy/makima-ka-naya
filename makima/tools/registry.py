@@ -148,6 +148,10 @@ class CapabilityToolRegistry:
             if not tool.fallback_for or tool.fallback_for not in available_names
         ]
 
+    def get_all_schemas(self, format: str = "openai", tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Return all schemas allowed by this capability profile, including fallback tools."""
+        return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
+
     async def execute(self, name: str, arguments: Optional[Dict[str, Any]] = None, catch_errors: bool = True) -> Any:
         tool = self.registry.get(name)
         if tool is None or not self._allowed(tool):
@@ -651,7 +655,7 @@ class ToolRegistry:
         format: str = "openai",
         tags: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Returns schemas for all registered tools formatted for target LLM provider."""
+        """Return primary tool schemas; conditional fallbacks are hidden while their primary is available."""
         tools = self.list_tools(tags=tags)
         active_names = {tool.name for tool in tools}
         return [
@@ -659,6 +663,14 @@ class ToolRegistry:
             for tool in tools
             if not tool.fallback_for or tool.fallback_for not in active_names
         ]
+
+    def get_all_schemas(
+        self,
+        format: str = "openai",
+        tags: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all registered schemas, including conditional fallbacks, for explicit recovery turns."""
+        return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
 
     def tool(
         self,
