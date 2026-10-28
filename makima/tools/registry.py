@@ -915,6 +915,8 @@ class ToolRegistry:
 
             try:
                 pkg = importlib.import_module(pkg_name) if isinstance(target, str) else target
+                if reload and isinstance(target, str):
+                    pkg = importlib.reload(pkg)
             except Exception as exc:
                 logger.warning("Failed to import package '%s' for tool discovery: %s", pkg_name, exc)
                 return 0
@@ -957,7 +959,11 @@ class ToolRegistry:
                             except Exception as exc:
                                 logger.warning("Error importing tool file '%s': %s", py_file, exc)
 
-            self._discovered = True
+            # The built-in catalogue and third-party plugin packages have separate
+            # discovery lifecycles. Scanning one custom plugin must not prevent the
+            # default makima.tools catalogue from being scanned later.
+            if pkg_name == "makima.tools":
+                self._discovered = True
             return discovered_count
         finally:
             self._discovering = False
