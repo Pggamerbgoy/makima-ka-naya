@@ -139,8 +139,14 @@ async def control_media(action: str) -> Dict[str, Any]:
 
 @tool(
     name="get_media_status",
-    description="Retrieves current active media playback info including song title, artist, album, and status.",
+    description="Read the currently active Windows media session: source app, track title, artist, album, and playback status. This does not start, stop, or change playback.",
     tags=["media", "status", "windows"],
+    purpose="Inspect what's currently playing and the current playback state.",
+    capabilities=["Report active media session, source application, title, artist, album, and play state."],
+    use_when=["The user asks what is playing, which application owns the current media session, or whether playback is active."],
+    avoid_when=["The user asks to pause, stop, resume, skip, or start a different track; use control_media or play_song as appropriate.","The user asks for system master-volume or mute state; use get_volume."],
+    examples=["What song is currently playing?","Check whether media is paused."],
+    side_effect="Read-only; does not change playback or system volume.",
 )
 async def get_media_status() -> Dict[str, Any]:
     """
