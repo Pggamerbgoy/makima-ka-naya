@@ -300,7 +300,9 @@ class GeminiLiveSession:
                 function_responses = []
 
                 for fc in function_calls:
-                    fn_name = fc.name
+                    raw_fn_name = str(fc.name or "")
+                    # Match the canonical schema name even if a provider adds a namespace prefix.
+                    fn_name = raw_fn_name.split(":")[-1] if ":" in raw_fn_name else raw_fn_name
                     fn_args = dict(fc.args) if hasattr(fc, "args") else {}
                     yield {
                         "type": "tool_call",
