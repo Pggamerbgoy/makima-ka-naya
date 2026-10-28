@@ -22,8 +22,14 @@ PROTECTED_PIDS = {0, 4}
 
 @tool(
     name="list_processes",
-    description="List active system processes with resource consumption metrics (CPU, RAM, PID, status).",
+    description="Read a list of running operating-system processes with CPU/RAM usage, PID, and status. This is process inventory, not application-window control.",
     tags=["os", "process", "monitoring"],
+    purpose="Inspect running processes and identify a target before a process-level action.",
+    capabilities=["List process names, PIDs, resource usage, account, status, and start time; sort by CPU, memory, PID, or name."],
+    use_when=["The user asks to inspect running processes, find a process consuming resources, or identify a PID."],
+    avoid_when=["The user asks to close an application normally; prefer terminate_application.","The user asks for high-level CPU, RAM, battery, or disk summary; prefer get_system_stats.","The user asks to kill a known process; use terminate_process only after identifying the intended target."],
+    examples=["Show the top memory-consuming processes.","Find the PID for a named executable."],
+    side_effect="Read-only; does not terminate or alter any process.",
 )
 def list_processes(
     limit: int = 20,
