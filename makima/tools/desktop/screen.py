@@ -109,6 +109,7 @@ def _capture_hwnd_to_image(hwnd: int) -> tuple[Image.Image | None, str | None]:
     name="capture_window",
     description="Capture a high-resolution screenshot of a target application window by title or HWND. Returns image path, dimensions, and window coordinates.",
     tags=["desktop", "vision", "screenshot"],
+    fallback_for="computer_use",
 )
 def capture_window(
     title_query: str | None = None,
@@ -165,6 +166,7 @@ def capture_window(
     name="capture_screen",
     description="Capture a screenshot of the active foreground window or primary desktop interface.",
     tags=["desktop", "vision", "screenshot"],
+    fallback_for="computer_use",
 )
 def capture_screen(
     save_path: str | None = None,
