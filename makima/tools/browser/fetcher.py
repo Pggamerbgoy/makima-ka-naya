@@ -85,6 +85,7 @@ def _extract_text_from_html(html_content: str, max_length: int = 20000) -> tuple
         "Use this as a fallback when those are unavailable."
     ),
     tags=["web", "browser", "fetch"],
+    fallback_for="fetch_page",
 )
 async def fetch_web_page(
     url: str,
@@ -195,6 +196,7 @@ def _unwrap_ddg_url(raw_url: str) -> str:
         "gives better results. Use this only as a fallback when web_search is unavailable."
     ),
     tags=["web", "browser", "search"],
+    fallback_for="web_search",
 )
 async def search_web(
     query: str,
