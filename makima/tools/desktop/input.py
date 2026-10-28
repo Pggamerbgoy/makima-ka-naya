@@ -206,6 +206,7 @@ def _get_active_window_info(target_hwnd: Optional[int] = None) -> str:
     name="get_cursor_position",
     description="Get current physical screen coordinates (X, Y) of the mouse cursor.",
     tags=["desktop", "input", "mouse"],
+    fallback_for="computer_use",
 )
 def get_cursor_position() -> dict[str, int]:
     """Returns the current mouse cursor coordinates."""
@@ -218,6 +219,7 @@ def get_cursor_position() -> dict[str, int]:
     name="mouse_move",
     description="Move the mouse cursor to specific physical screen coordinates (X, Y). Supports smooth multi-step motion.",
     tags=["desktop", "input", "mouse"],
+    fallback_for="computer_use",
 )
 def mouse_move(
     x: int,
@@ -262,6 +264,7 @@ def mouse_move(
     name="mouse_click",
     description="Perform a mouse click (single, double, triple, right, middle) at optional coordinates or current cursor location.",
     tags=["desktop", "input", "mouse"],
+    fallback_for="computer_use",
 )
 def mouse_click(
     x: int | None = None,
@@ -324,6 +327,7 @@ def mouse_click(
     name="mouse_drag",
     description="Drag and drop mouse from start coordinates to end coordinates.",
     tags=["desktop", "input", "mouse"],
+    fallback_for="computer_use",
 )
 def mouse_drag(
     start_x: int,
@@ -375,6 +379,7 @@ def mouse_drag(
     name="mouse_scroll",
     description="Scroll the mouse wheel vertically or horizontally.",
     tags=["desktop", "input", "mouse"],
+    fallback_for="computer_use",
 )
 def mouse_scroll(
     clicks: int,
@@ -411,6 +416,7 @@ def mouse_scroll(
     name="keyboard_type",
     description="Type text natively into the active foreground window or target application using Win32 Unicode keystrokes. Supports all international characters, symbols, and emojis.",
     tags=["desktop", "input", "keyboard"],
+    fallback_for="computer_use",
 )
 def keyboard_type(
     text: str,
@@ -486,6 +492,7 @@ def keyboard_type(
     name="keyboard_hotkey",
     description="Press a combination or chord of keys simultaneously (e.g. ['ctrl', 's'], ['alt', 'tab'], ['ctrl', 'shift', 'esc'], ['win', 'r']).",
     tags=["desktop", "input", "keyboard"],
+    fallback_for="computer_use",
 )
 def keyboard_hotkey(
     keys: list[str],
