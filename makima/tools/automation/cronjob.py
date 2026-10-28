@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import re
 import time
 import uuid
@@ -83,6 +84,22 @@ def reset_scheduler() -> None:
 # Notification & Execution Hooks
 # ---------------------------------------------------------------------------
 
+def _send_default_notification(payload: Dict[str, Any]) -> bool:
+    """Deliver a scheduled reminder as a Windows toast when no handler is wired."""
+    if os.name != "nt":
+        return False
+    try:
+        from makima.tools.os.notifications import show_desktop_notification
+
+        title = f"Makima reminder: {str(payload.get('name') or 'Scheduled job')[:100]}"
+        message = str(payload.get("prompt") or "A scheduled Makima job has fired.")[:1800]
+        result = show_desktop_notification(title=title, message=message)
+        return bool(isinstance(result, dict) and result.get("success"))
+    except Exception as exc:
+        logger.warning("Default scheduled-reminder notification failed: %s", exc)
+        return False
+
+
 def register_notification_handler(handler: Callable[[Dict[str, Any]], Any]) -> None:
     """Registers a callback or listener to receive cronjob execution notifications."""
     if handler not in _NOTIFICATION_HANDLERS:
@@ -145,7 +162,9 @@ async def _cron_job_executor(job_id: str, name: str, prompt: str) -> Dict[str, A
     except Exception as exc:
         logger.warning("Telemetry emit failed for cronjob [%s]: %s", job_id, exc)
 
-    # 3. Dispatches to registered notification handlers
+    # 3. Dispatch to registered handlers. If none handled the event, provide a
+    # useful Windows desktop-toast fallback so scheduled reminders are visible
+    # in a normal local Makima installation without requiring plugin setup.
     handler_results = []
     for handler in list(_NOTIFICATION_HANDLERS):
         try:
@@ -158,6 +177,16 @@ async def _cron_job_executor(job_id: str, name: str, prompt: str) -> Dict[str, A
             handler_results.append(res)
         except Exception as exc:
             logger.error("Error in cronjob notification handler: %s", exc, exc_info=True)
+
+    if not handler_results:
+        notification_sent = _send_default_notification(payload)
+        if notification_sent:
+            handler_results.append({"default_notification": True})
+        else:
+            logger.warning(
+                "Scheduled job '%s' fired without a notification handler; event was recorded but no user notification was delivered.",
+                job_id,
+            )
 
     _EXECUTION_HISTORY.append(payload)
     if len(_EXECUTION_HISTORY) > 500:
@@ -296,11 +325,33 @@ def _find_job(scheduler: AsyncIOScheduler, target: str) -> Optional[Job]:
 @tool(
     name="cronjob_manage",
     description=(
-        "Hermes-Style async job scheduler using APScheduler. "
-        "Supports one-shot delayed reminders (delay_seconds), recurring crontab schedules (schedule='0 9 * * *'), "
-        "and periodic intervals (schedule='interval:60'). Actions: create, list, pause, resume, remove, run."
+        "Manage Makima's scheduled reminders and recurring jobs. Supports a one-shot delay (delay_seconds), "
+        "5-field cron expression (for example schedule='0 9 * * *'), and intervals such as schedule='interval:60'. "
+        "Actions: create, list, pause, resume, remove, run. Use only for explicit scheduling or managing an existing job; "
+        "do not use it to perform an immediate task."
     ),
     tags=["automation", "cron", "scheduler", "jobs"],
+    purpose="Create, inspect, pause, resume, manually run, or remove scheduled reminders and recurring jobs.",
+    capabilities=[
+        "Create one-shot delayed jobs or recurring cron/interval jobs.",
+        "List existing jobs and their next run time.",
+        "Pause, resume, manually run, or remove a named job.",
+    ],
+    use_when=[
+        "The user explicitly asks to remind them later, schedule a future action, or repeat a task periodically.",
+        "The user asks to list, pause, resume, manually run, or remove an already scheduled job.",
+    ],
+    avoid_when=[
+        "The user asks for an immediate action rather than a scheduled one.",
+        "The user asks a question about time/date without requesting a reminder or recurring job.",
+        "The user asks to execute an automated workflow; confirm that a scheduled handler supports it instead of assuming the prompt field itself runs arbitrary workflows.",
+    ],
+    examples=[
+        "Remind me in 30 minutes to check the download.",
+        "Schedule a recurring status check every hour.",
+        "List and remove an existing reminder by name.",
+    ],
+    side_effect="Creates or changes scheduler jobs; jobs can continue firing until paused or removed.",
 )
 async def cronjob_manage(
     action: str,

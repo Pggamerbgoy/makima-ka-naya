@@ -22,8 +22,14 @@ PROTECTED_PIDS = {0, 4}
 
 @tool(
     name="list_processes",
-    description="List active system processes with resource consumption metrics (CPU, RAM, PID, status).",
+    description="Read a list of running operating-system processes with CPU/RAM usage, PID, and status. This is process inventory, not application-window control.",
     tags=["os", "process", "monitoring"],
+    purpose="Inspect running processes and identify a target before a process-level action.",
+    capabilities=["List process names, PIDs, resource usage, account, status, and start time; sort by CPU, memory, PID, or name."],
+    use_when=["The user asks to inspect running processes, find a process consuming resources, or identify a PID."],
+    avoid_when=["The user asks to close an application normally; prefer terminate_application.","The user asks for high-level CPU, RAM, battery, or disk summary; prefer get_system_stats.","The user asks to kill a known process; use terminate_process only after identifying the intended target."],
+    examples=["Show the top memory-consuming processes.","Find the PID for a named executable."],
+    side_effect="Read-only; does not terminate or alter any process.",
 )
 def list_processes(
     limit: int = 20,
@@ -96,8 +102,14 @@ def list_processes(
 
 @tool(
     name="get_process_info",
-    description="Retrieve comprehensive details for a specific process by PID or process name.",
+    description="Read detailed runtime properties for one process identified by PID or executable name, including command line, parent PID, CPU/RAM, and handles.",
     tags=["os", "process", "monitoring"],
+    purpose="Inspect a particular process precisely before deciding whether any process action is needed.",
+    capabilities=["Resolve one process by PID or exact/partial name and return detailed properties."],
+    use_when=["The user asks for details about a specific process or the target needs verification before termination."],
+    avoid_when=["The user asks for the current overall system load; prefer get_system_stats.","The user asks to close an application normally; prefer terminate_application rather than inspecting/terminating arbitrary processes."],
+    examples=["Inspect the process ID of a named executable.","Check the command line for a particular PID."],
+    side_effect="Read-only; does not terminate or alter the process.",
 )
 def get_process_info(
     pid: Optional[int] = None,

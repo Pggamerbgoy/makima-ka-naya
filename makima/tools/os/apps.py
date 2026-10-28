@@ -62,12 +62,31 @@ def _resolve_executable_path(app_name: str) -> Optional[str]:
 @tool(
     name="launch_app",
     description=(
-        "Use when you need to open an application or program by name or path "
-        "(e.g. 'notepad', 'calc', 'brave', 'code'). "
-        "To open a URL in a browser, use play_song or browser_interact instead. "
-        "To run a shell command or script, use execute_command instead."
+        "Low-level executable launcher for an explicit program path or a program that needs command-line arguments. "
+        "For ordinary installed Windows applications requested by friendly name (for example, 'open Calculator' or "
+        "'launch Brave'), prefer launch_application, which resolves installed-app aliases and URI protocols. "
+        "For websites or URLs, use browser_interact; for shell commands or scripts, use execute_command."
     ),
     tags=["os", "apps", "execution"],
+    purpose="Launch an explicit executable path or launch a program with command-line arguments.",
+    capabilities=[
+        "Launch an executable by path or a resolvable command name.",
+        "Pass explicit command-line arguments to the launched process.",
+    ],
+    use_when=[
+        "The user provides an executable path or asks to launch a program with arguments.",
+        "The higher-level installed-application resolver is not suitable for the requested executable.",
+    ],
+    avoid_when=[
+        "The user only names a normal installed Windows application; prefer launch_application.",
+        "The user asks to open a website or interact with browser content.",
+        "The user asks to execute a shell command or script rather than start a desktop app.",
+    ],
+    examples=[
+        "Launch a supplied path to an executable.",
+        "Start a program with explicit command-line arguments.",
+    ],
+    side_effect="Starts a local process; does not search or interact with website content.",
 )
 def launch_app(
     app_name: str,

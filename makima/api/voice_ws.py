@@ -23,6 +23,17 @@ logger = logging.getLogger("makima.api.voice_ws")
 router = APIRouter()
 
 
+def _get_sentinel_daemon() -> Any:
+    """Return the Windows desktop sentinel only when its platform dependencies exist."""
+    try:
+        from makima.sentinel.event_daemon import get_sentinel_daemon
+        return get_sentinel_daemon()
+    except (ImportError, OSError) as exc:
+        # The browser voice bridge may run on Linux/container hosts without Win32 APIs.
+        logger.debug("Desktop sentinel is unavailable on this platform: %s", exc)
+        return None
+
+
 @router.websocket("/ws/voice")
 async def voice_bridge(websocket: WebSocket) -> None:
     """Proxy a browser voice session to Gemini Live without exposing credentials."""
@@ -102,8 +113,7 @@ async def voice_bridge(websocket: WebSocket) -> None:
                 try:
                     await session.connect()
                     receive_task = asyncio.create_task(forward_events(session))
-                    from makima.sentinel.event_daemon import get_sentinel_daemon
-                    sentinel = get_sentinel_daemon()
+                    sentinel = _get_sentinel_daemon()
                     if sentinel:
                         sentinel.set_live_dispatcher(
                             session.send_text_prompt,
@@ -115,8 +125,7 @@ async def voice_bridge(websocket: WebSocket) -> None:
                     await session.close()
                     session = None
             elif event_type == "stop":
-                from makima.sentinel.event_daemon import get_sentinel_daemon
-                sentinel = get_sentinel_daemon()
+                sentinel = _get_sentinel_daemon()
                 if sentinel:
                     sentinel.set_live_dispatcher(None)
                 if receive_task:
@@ -136,8 +145,7 @@ async def voice_bridge(websocket: WebSocket) -> None:
     except Exception as exc:
         logger.exception("Voice WebSocket failed: %s", exc)
     finally:
-        from makima.sentinel.event_daemon import get_sentinel_daemon
-        sentinel = get_sentinel_daemon()
+        sentinel = _get_sentinel_daemon()
         if sentinel:
             sentinel.set_live_dispatcher(None)
         if receive_task:

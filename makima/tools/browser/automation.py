@@ -1047,8 +1047,13 @@ async def browser_interact(
 
 @tool(
     name="browse_page",
-    description="Quick one-shot web page reader using Playwright. Fetches dynamic JS pages and returns visible text.",
+    description=(
+        "Backward-compatibility alias for reading a browser-rendered page. Prefer browser_interact, which exposes "
+        "the same persistent browser session and supports follow-up interaction. Use this only when browser_interact "
+        "is unavailable."
+    ),
     tags=["web", "browser", "automation"],
+    fallback_for="browser_interact",
 )
 async def browse_page(
     url: str,

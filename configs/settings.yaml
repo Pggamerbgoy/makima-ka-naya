@@ -21,11 +21,14 @@ providers:
 
   # Task Cascades: Prioritized free/active tiers
   cascades:
-    fast_chat: ["gemini_3_8_live", "gemini", "gemini_live", "groq", "openrouter_free", "ollama"]
-    code: ["gemini_3_8_live", "gemini", "gemini_live", "groq", "openrouter_free", "ollama"]
-    deep_reasoning: ["gemini_3_8_live", "gemini", "gemini_live", "groq", "openrouter_free", "ollama"]
-    vision: ["gemini_3_8_live", "gemini", "gemini_live"]
-    voice: ["gemini_3_8_live", "gemini_live"]
+    # Text/coding/reasoning use standard text-capable backends.
+    # Gemini Live is reserved for actual real-time voice sessions.
+    fast_chat: ["gemini", "groq", "openrouter_free", "ollama"]
+    code: ["ollama", "groq", "openrouter_free", "gemini"]
+    deep_reasoning: ["gemini", "openrouter_free", "ollama"]
+    vision: ["gemini"]
+    # One backend alias is enough; the previous two names resolved to the same model.
+    voice: ["gemini_live"]
     offline: ["ollama"]
     # OSWorld evaluates Makima end-to-end with Alibaba Cloud as its reasoning backend.
     osworld: [
@@ -219,19 +222,13 @@ providers:
       latency_tier: "fast"
       context_limit: 1000000
 
-    gemini_3_8_live:
-      adapter: "gemini"
-      model: "gemini-3.8-live"
-      api_key_env: "GEMINI_API_KEY"
-      latency_tier: "fast"
-      context_limit: 1000000
-
     gemini_live:
       adapter: "gemini"
       model: "gemini-3.8-live"
       api_key_env: "GEMINI_API_KEY"
       latency_tier: "fast"
       context_limit: 1000000
+      allowed_tasks: ["voice"]
 
     groq:
       adapter: "openai"
@@ -306,8 +303,10 @@ tools:
     enabled: true
     embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     minimum_similarity: 0.15
-    minimum_candidates: 8
-    max_candidates: 16
+    minimum_candidates: 20
+    # High-recall semantic shortlist; hidden-tool recovery and low-confidence
+    # fail-open retain access to features without sending every schema every turn.
+    max_candidates: 32
 
   sandbox:
     mode: "local_clamped" # "local_clamped" or "docker"

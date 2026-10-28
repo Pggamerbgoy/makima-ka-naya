@@ -12,7 +12,7 @@ import pytest
 
 from makima.api.app import create_app
 from makima.core.engine import HermesAgentEngine
-from makima.provider.adapters.base import Message, ProviderResponse
+from makima.provider.adapters.base import Message, ProviderResponse, ToolCall
 from makima.provider.router import ParetoRouter
 from makima.tools.registry import ToolRegistry
 
@@ -36,6 +36,13 @@ class ContractRouter(ParetoRouter):
 def make_client(state_path: Path | None = None, ui_dist_path: Path | None = None) -> TestClient:
     registry = ToolRegistry()
     registry.register(lambda query: query, name="search_demo", description="Search demo data", tags=["search"])
+    registry.register(
+        lambda query: query,
+        name="search_demo_fallback",
+        description="Fallback search demo data",
+        tags=["search"],
+        fallback_for="search_demo",
+    )
     return TestClient(create_app(engine=HermesAgentEngine(router=ContractRouter()), registry=registry, ui_state_path=state_path, ui_dist_path=ui_dist_path))
 
 
@@ -81,6 +88,14 @@ def test_settings_connectors_and_tools_contract(tmp_path: Path, monkeypatch: pyt
     assert tools[0]["enabled"] is True and tools[0]["category"] == "search"
     disabled = client.post("/api/tools/search_demo/enabled", json={"enabled": False})
     assert disabled.status_code == 200 and disabled.json()["enabled"] is False
+    disabled_tool_listing = {
+        item["function"]["name"]: item
+        for item in client.get("/api/tools").json()["tools"]
+    }
+    assert disabled_tool_listing["search_demo"]["enabled"] is False
+    assert disabled_tool_listing["search_demo_fallback"]["enabled"] is True, (
+        "The UI should reveal a conditional fallback when its primary tool is disabled."
+    )
 
     connector_check = client.post("/api/connectors/github/check")
     assert connector_check.status_code == 200
@@ -211,3 +226,82 @@ def test_cors_preflight_allows_delete_and_patch(tmp_path: Path):
     assert "DELETE" in res.headers.get("access-control-allow-methods", "")
     assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
+
+
+
+def test_rest_chat_respects_disabled_tool_gateway(tmp_path: Path) -> None:
+    executions: list[dict[str, Any]] = []
+    registry = ToolRegistry()
+
+    def destructive_demo(target: str) -> dict[str, Any]:
+        executions.append({"target": target})
+        return {"success": True}
+
+    registry.register(
+        destructive_demo,
+        name="destructive_demo",
+        description="Test-only action that must not run while disabled.",
+        tags=["control"],
+    )
+
+    class DisabledToolRouter(ContractRouter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.responses = [
+                ProviderResponse(
+                    content="",
+                    model="contract-model",
+                    tool_calls=[
+                        ToolCall(
+                            id="disabled-rest-call",
+                            name="destructive_demo",
+                            arguments={"target": "must-not-run"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ProviderResponse(
+                    content="The disabled action was not executed.",
+                    model="contract-model",
+                    finish_reason="stop",
+                ),
+            ]
+
+        async def execute_with_fallback(
+            self,
+            task: str,
+            messages: List[Message],
+            system_prompt: Optional[str] = None,
+            tools: Optional[List[Dict[str, Any]]] = None,
+            temperature: float = 0.7,
+            max_tokens: Optional[int] = None,
+            preferred_backend: Optional[str] = None,
+            **kwargs: Any,
+        ) -> ProviderResponse:
+            self.calls = getattr(self, "calls", [])
+            self.calls.append({"tools": tools})
+            return self.responses.pop(0)
+
+    router = DisabledToolRouter()
+    engine = HermesAgentEngine(router=router)
+    client = TestClient(
+        create_app(
+            engine=engine,
+            registry=registry,
+            ui_state_path=tmp_path / "ui_state.json",
+            ui_dist_path=tmp_path / "missing-dist",
+        )
+    )
+
+    disabled = client.post("/api/tools/destructive_demo/enabled", json={"enabled": False})
+    assert disabled.status_code == 200
+    response = client.post("/api/chat", json={"prompt": "Run the test action."})
+
+    assert response.status_code == 200, response.text
+    assert executions == [], "REST chat must not bypass disabled tool state."
+    tool_messages = [
+        item.get("content", "")
+        for item in response.json()["messages"]
+        if item.get("role") == "tool"
+    ]
+    assert any("[TOOL_NOT_AVAILABLE: destructive_demo]" in value for value in tool_messages)

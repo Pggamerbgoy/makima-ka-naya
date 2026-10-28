@@ -62,6 +62,9 @@ class BackendConfig(BaseModel):
     base_url: Optional[str] = None
     latency_tier: str = "standard"
     context_limit: int = 286000
+    # Optional task scope for specialized backends. None means general-purpose;
+    # a configured list is a hard compatibility boundary for routing/fallback.
+    allowed_tasks: Optional[List[str]] = None
 
     @property
     def api_key(self) -> Optional[str]:
@@ -183,8 +186,11 @@ class ConcurrencyToolsConfig(BaseModel):
 class ToolSelectionConfig(BaseModel):
     enabled: bool = True
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # High-recall semantic shortlist for the current ~68-tool catalogue. Missing-tool
+    # requests trigger a full-catalog recovery turn; low-confidence queries fail open.
+    # This avoids sending every schema on every request while keeping recall high.
     max_candidates: int = Field(default=32, ge=1)
-    minimum_candidates: int = Field(default=16, ge=1)
+    minimum_candidates: int = Field(default=20, ge=1)
     minimum_similarity: float = Field(default=0.20, ge=-1.0, le=1.0)
 
 

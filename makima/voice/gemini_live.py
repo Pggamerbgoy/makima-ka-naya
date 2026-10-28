@@ -16,6 +16,7 @@ from google.genai import types
 from makima.config import get_settings
 from makima.tools.registry import get_registry
 from makima.tools.selection import ToolExecutionGateway
+from makima.core.tool_selection_policy import TOOL_SELECTION_GUIDANCE
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,9 @@ DEFAULT_VOICE_SYSTEM_INSTRUCTION = (
     "2. Spoken output must be natural and brief; never recite long URLs, code, or file paths aloud.\n"
     "3. For songs/audio use play_song. For anime/video viewing use browser_interact (never play_song); use user's preferred streaming site or requested URL."
 )
+
+# Keep voice tool-selection behavior aligned with regular chat.
+DEFAULT_VOICE_SYSTEM_INSTRUCTION = DEFAULT_VOICE_SYSTEM_INSTRUCTION + "\n\n" + TOOL_SELECTION_GUIDANCE
 
 
 class GeminiLiveSession:
@@ -258,7 +262,11 @@ class GeminiLiveSession:
         if not self._is_active or self._session is None:
             raise RuntimeError("Live session is not active.")
 
-        reg = get_registry()
+        # Execute with the same gateway that supplied this session's schemas;
+        # direct registry execution would bypass disabled-tool and guardrail checks.
+        if self.execution_gateway is None:
+            self.execution_gateway = ToolExecutionGateway(get_registry())
+        gateway = self.execution_gateway
 
         async for response in self._session.receive():
             server_content = getattr(response, "server_content", None)
@@ -292,7 +300,9 @@ class GeminiLiveSession:
                 function_responses = []
 
                 for fc in function_calls:
-                    fn_name = fc.name
+                    raw_fn_name = str(fc.name or "")
+                    # Match the canonical schema name even if a provider adds a namespace prefix.
+                    fn_name = raw_fn_name.split(":")[-1] if ":" in raw_fn_name else raw_fn_name
                     fn_args = dict(fc.args) if hasattr(fc, "args") else {}
                     yield {
                         "type": "tool_call",
@@ -301,8 +311,12 @@ class GeminiLiveSession:
                         "call_id": getattr(fc, "id", None),
                     }
 
-                    # Execute tool via ToolRegistry
-                    result = await reg.execute(fn_name, fn_args)
+                    # Enforce the exact schema allowlist for this live session.
+                    result = await gateway.execute(
+                        fn_name,
+                        fn_args,
+                        allowed_tool_names=self._available_tool_names,
+                    )
                     yield {
                         "type": "tool_result",
                         "name": fn_name,

@@ -140,6 +140,16 @@ class CapabilityToolRegistry:
         return [tool.name for tool in self.list_tools(tags=tags)]
 
     def get_schemas(self, format: str = "openai", tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        available_tools = self.list_tools(tags=tags)
+        available_names = {tool.name for tool in available_tools}
+        return [
+            tool.to_schema(format=format)
+            for tool in available_tools
+            if not tool.fallback_for or tool.fallback_for not in available_names
+        ]
+
+    def get_all_schemas(self, format: str = "openai", tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Return all schemas allowed by this capability profile, including fallback tools."""
         return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
 
     async def execute(self, name: str, arguments: Optional[Dict[str, Any]] = None, catch_errors: bool = True) -> Any:
@@ -170,8 +180,10 @@ def parse_docstring_params(doc: Optional[str]) -> Dict[str, str]:
     if not doc:
         return {}
 
+    # Normalize nested/local tool docstrings before matching Args fields.
+    # Extra source indentation otherwise prevents descriptions from reaching schemas.
     params: Dict[str, str] = {}
-    lines = doc.splitlines()
+    lines = inspect.cleandoc(doc).splitlines()
 
     # 1. Sphinx / reST style: :param name: description
     sphinx_pattern = re.compile(r"^\s*:param\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)$")
@@ -373,6 +385,7 @@ class Tool:
     avoid_when: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
     side_effect: str = ""
+    fallback_for: Optional[str] = None
 
     @property
     def selection_guidance(self) -> str:
@@ -395,6 +408,11 @@ class Tool:
     def model_description(self) -> str:
         """Complete description shown to the LLM without changing the canonical base description."""
         guidance = self.selection_guidance
+        if self.fallback_for:
+            fallback_guidance = (
+                f"Fallback tool for '{self.fallback_for}'. Use only when that primary tool is unavailable."
+            )
+            guidance = f"{guidance}\n{fallback_guidance}" if guidance else fallback_guidance
         if not guidance:
             return self.description
         return f"{self.description}\n\n{guidance}"
@@ -415,6 +433,7 @@ class Tool:
         avoid_when: Optional[List[str]] = None,
         examples: Optional[List[str]] = None,
         side_effect: Optional[str] = None,
+        fallback_for: Optional[str] = None,
     ) -> "Tool":
         """Builds a Tool instance by introspecting a function."""
         tool_name = name or getattr(fn, "__name__", "unnamed_tool")
@@ -451,6 +470,7 @@ class Tool:
             avoid_when=list(avoid_when or []),
             examples=list(examples or []),
             side_effect=side_effect or "",
+            fallback_for=fallback_for,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -501,6 +521,7 @@ class ToolRegistry:
     ):
         self.name = name
         self._tools: Dict[str, Tool] = {}
+        self._discovered_tool_names: Set[str] = set()
         self._discovered = False
         self._discovering = False
         dyn_safe, dyn_mut = get_concurrency_tag_boundaries()
@@ -544,6 +565,7 @@ class ToolRegistry:
         avoid_when: Optional[List[str]] = None,
         examples: Optional[List[str]] = None,
         side_effect: Optional[str] = None,
+        fallback_for: Optional[str] = None,
     ) -> Tool:
         """
         Registers a function or Tool object into this registry.
@@ -568,6 +590,7 @@ class ToolRegistry:
             avoid_when=avoid_when,
             examples=examples,
             side_effect=side_effect,
+            fallback_for=fallback_for,
         )
         return self.register_tool(tool_obj)
 
@@ -612,6 +635,7 @@ class ToolRegistry:
     def clear(self) -> None:
         """Clears all registered tools."""
         self._tools.clear()
+        self._discovered_tool_names.clear()
         self._discovered = False
 
     def list_tools(self, tags: Optional[List[str]] = None) -> List[Tool]:
@@ -631,9 +655,22 @@ class ToolRegistry:
         format: str = "openai",
         tags: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Returns schemas for all registered tools formatted for target LLM provider."""
+        """Return primary tool schemas; conditional fallbacks are hidden while their primary is available."""
         tools = self.list_tools(tags=tags)
-        return [t.to_schema(format=format) for t in tools]
+        active_names = {tool.name for tool in tools}
+        return [
+            tool.to_schema(format=format)
+            for tool in tools
+            if not tool.fallback_for or tool.fallback_for not in active_names
+        ]
+
+    def get_all_schemas(
+        self,
+        format: str = "openai",
+        tags: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all registered schemas, including conditional fallbacks, for explicit recovery turns."""
+        return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
 
     def tool(
         self,
@@ -647,6 +684,7 @@ class ToolRegistry:
         avoid_when: Optional[List[str]] = None,
         examples: Optional[List[str]] = None,
         side_effect: Optional[str] = None,
+        fallback_for: Optional[str] = None,
     ) -> Callable:
         """Decorator to register a tool directly on this registry instance."""
         def decorator(fn: Callable) -> Callable:
@@ -664,6 +702,7 @@ class ToolRegistry:
                 avoid_when=avoid_when,
                 examples=examples,
                 side_effect=side_effect,
+                fallback_for=fallback_for,
             )
             setattr(fn, "__makima_tool__", True)
             setattr(fn, "__tool_name__", tool_obj.name)
@@ -843,17 +882,20 @@ class ToolRegistry:
     # Auto-Discovery Scanner
     # -----------------------------------------------------------------------
 
-    def _scan_module(self, mod: ModuleType) -> int:
-        """Inspects module attributes and registers decorated tools."""
+    def _scan_module(self, mod: ModuleType, *, replace_existing: bool = False) -> int:
+        """Register decorated tools; optionally replace stale implementations during reload."""
         count = 0
         for attr_name, attr_val in inspect.getmembers(mod):
             if callable(attr_val) and getattr(attr_val, "__makima_tool__", False):
                 tool_obj = getattr(attr_val, "__tool_obj__", None)
                 if tool_obj is None:
                     tool_obj = Tool.from_function(attr_val)
-                if tool_obj.name not in self._tools:
+                self._discovered_tool_names.add(tool_obj.name)
+                was_registered = tool_obj.name in self._tools
+                if not was_registered or replace_existing:
                     self.register_tool(tool_obj)
-                    count += 1
+                    if not was_registered:
+                        count += 1
         return count
 
     def discover(
@@ -870,6 +912,13 @@ class ToolRegistry:
         self._discovering = True
 
         try:
+            if reload:
+                # Remove entries discovered during the previous scan before rescanning.
+                # This clears renamed/deleted tools as well as replacing stale functions.
+                for discovered_name in list(self._discovered_tool_names):
+                    self.unregister(discovered_name)
+                self._discovered_tool_names.clear()
+
             if self._discovered and not reload and package in (None, "makima.tools"):
                 return 0
 
@@ -878,14 +927,17 @@ class ToolRegistry:
 
             try:
                 pkg = importlib.import_module(pkg_name) if isinstance(target, str) else target
+                if reload and isinstance(target, str):
+                    pkg = importlib.reload(pkg)
             except Exception as exc:
                 logger.warning("Failed to import package '%s' for tool discovery: %s", pkg_name, exc)
                 return 0
 
             discovered_count = 0
 
-            # Scan the root module itself
-            discovered_count += self._scan_module(pkg)
+            # Scan the root module itself. An explicit reload must also refresh
+            # already-registered Tool objects, not merely import fresh Python code.
+            discovered_count += self._scan_module(pkg, replace_existing=reload)
 
             # If it's a package with __path__, traverse subpackages/submodules
             if hasattr(pkg, "__path__"):
@@ -897,8 +949,8 @@ class ToolRegistry:
                     try:
                         mod = importlib.import_module(module_info.name)
                         if reload:
-                            importlib.reload(mod)
-                        discovered_count += self._scan_module(mod)
+                            mod = importlib.reload(mod)
+                        discovered_count += self._scan_module(mod, replace_existing=reload)
                     except Exception as exc:
                         logger.warning("Error importing tool module '%s': %s", module_info.name, exc)
 
@@ -915,11 +967,15 @@ class ToolRegistry:
                         if mod_name not in sys.modules:
                             try:
                                 mod = importlib.import_module(mod_name)
-                                discovered_count += self._scan_module(mod)
+                                discovered_count += self._scan_module(mod, replace_existing=reload)
                             except Exception as exc:
                                 logger.warning("Error importing tool file '%s': %s", py_file, exc)
 
-            self._discovered = True
+            # The built-in catalogue and third-party plugin packages have separate
+            # discovery lifecycles. Scanning one custom plugin must not prevent the
+            # default makima.tools catalogue from being scanned later.
+            if pkg_name == "makima.tools":
+                self._discovered = True
             return discovered_count
         finally:
             self._discovering = False
@@ -959,6 +1015,7 @@ def tool(
     avoid_when: Optional[List[str]] = None,
     examples: Optional[List[str]] = None,
     side_effect: Optional[str] = None,
+    fallback_for: Optional[str] = None,
 ) -> Callable:
     """
     Primary @tool decorator.
@@ -986,6 +1043,7 @@ def tool(
             avoid_when=avoid_when,
             examples=examples,
             side_effect=side_effect,
+            fallback_for=fallback_for,
         )
 
         setattr(fn, "__makima_tool__", True)
