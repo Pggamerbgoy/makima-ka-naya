@@ -798,3 +798,24 @@ async def test_router_streaming_preserves_structured_tool_calls() -> None:
     assert len(response.tool_calls) == 1
     assert response.tool_calls[0].name == "set_volume"
     assert response.tool_calls[0].arguments == {"percent": 35}
+
+
+
+def test_custom_plugin_discovery_does_not_skip_builtin_catalogue() -> None:
+    registry = ToolRegistry(name="custom-plugin-discovery")
+    module = ModuleType("test_custom_plugin_package")
+
+    def plugin_action() -> str:
+        return "plugin"
+
+    plugin_tool = Tool.from_function(plugin_action, name="plugin_action")
+    setattr(plugin_action, "__makima_tool__", True)
+    setattr(plugin_action, "__tool_obj__", plugin_tool)
+    setattr(module, "plugin_action", plugin_action)
+
+    registry.discover(package=module)
+
+    assert registry.has("plugin_action")
+    assert registry._discovered is False, (
+        "Discovering a custom module must not mark the default makima.tools catalogue as loaded."
+    )
