@@ -515,6 +515,7 @@ class ToolRegistry:
     ):
         self.name = name
         self._tools: Dict[str, Tool] = {}
+        self._discovered_tool_names: Set[str] = set()
         self._discovered = False
         self._discovering = False
         dyn_safe, dyn_mut = get_concurrency_tag_boundaries()
@@ -628,6 +629,7 @@ class ToolRegistry:
     def clear(self) -> None:
         """Clears all registered tools."""
         self._tools.clear()
+        self._discovered_tool_names.clear()
         self._discovered = False
 
     def list_tools(self, tags: Optional[List[str]] = None) -> List[Tool]:
@@ -874,6 +876,7 @@ class ToolRegistry:
                 tool_obj = getattr(attr_val, "__tool_obj__", None)
                 if tool_obj is None:
                     tool_obj = Tool.from_function(attr_val)
+                self._discovered_tool_names.add(tool_obj.name)
                 was_registered = tool_obj.name in self._tools
                 if not was_registered or replace_existing:
                     self.register_tool(tool_obj)
@@ -895,6 +898,13 @@ class ToolRegistry:
         self._discovering = True
 
         try:
+            if reload:
+                # Remove entries discovered during the previous scan before rescanning.
+                # This clears renamed/deleted tools as well as replacing stale functions.
+                for discovered_name in list(self._discovered_tool_names):
+                    self.unregister(discovered_name)
+                self._discovered_tool_names.clear()
+
             if self._discovered and not reload and package in (None, "makima.tools"):
                 return 0
 
