@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import re
 import time
 import uuid
@@ -83,6 +84,22 @@ def reset_scheduler() -> None:
 # Notification & Execution Hooks
 # ---------------------------------------------------------------------------
 
+def _send_default_notification(payload: Dict[str, Any]) -> bool:
+    """Deliver a scheduled reminder as a Windows toast when no handler is wired."""
+    if os.name != "nt":
+        return False
+    try:
+        from makima.tools.os.notifications import show_desktop_notification
+
+        title = f"Makima reminder: {str(payload.get('name') or 'Scheduled job')[:100]}"
+        message = str(payload.get("prompt") or "A scheduled Makima job has fired.")[:1800]
+        result = show_desktop_notification(title=title, message=message)
+        return bool(isinstance(result, dict) and result.get("success"))
+    except Exception as exc:
+        logger.warning("Default scheduled-reminder notification failed: %s", exc)
+        return False
+
+
 def register_notification_handler(handler: Callable[[Dict[str, Any]], Any]) -> None:
     """Registers a callback or listener to receive cronjob execution notifications."""
     if handler not in _NOTIFICATION_HANDLERS:
@@ -145,7 +162,9 @@ async def _cron_job_executor(job_id: str, name: str, prompt: str) -> Dict[str, A
     except Exception as exc:
         logger.warning("Telemetry emit failed for cronjob [%s]: %s", job_id, exc)
 
-    # 3. Dispatches to registered notification handlers
+    # 3. Dispatch to registered handlers. If none handled the event, provide a
+    # useful Windows desktop-toast fallback so scheduled reminders are visible
+    # in a normal local Makima installation without requiring plugin setup.
     handler_results = []
     for handler in list(_NOTIFICATION_HANDLERS):
         try:
@@ -158,6 +177,16 @@ async def _cron_job_executor(job_id: str, name: str, prompt: str) -> Dict[str, A
             handler_results.append(res)
         except Exception as exc:
             logger.error("Error in cronjob notification handler: %s", exc, exc_info=True)
+
+    if not handler_results:
+        notification_sent = _send_default_notification(payload)
+        if notification_sent:
+            handler_results.append({"default_notification": True})
+        else:
+            logger.warning(
+                "Scheduled job '%s' fired without a notification handler; event was recorded but no user notification was delivered.",
+                job_id,
+            )
 
     _EXECUTION_HISTORY.append(payload)
     if len(_EXECUTION_HISTORY) > 500:
