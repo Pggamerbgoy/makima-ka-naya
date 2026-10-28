@@ -902,3 +902,70 @@ async def test_primary_tool_failure_exposes_registered_fallback_on_next_turn() -
     assert second_names == {"primary_lookup", "fallback_lookup"}
     assert executed == ["primary_lookup", "fallback_lookup"]
     assert result.completed is True
+
+
+
+@pytest.mark.asyncio
+async def test_task_scoped_live_backend_cannot_leak_into_text_fallback() -> None:
+    attempted: list[str] = []
+
+    class FakeProvider:
+        def __init__(self, name: str, allowed_tasks: list[str] | None = None, fail: bool = False) -> None:
+            self.name = name
+            self.config = SimpleNamespace(
+                model=name,
+                latency_tier="fast",
+                allowed_tasks=allowed_tasks,
+            )
+            self.is_available = True
+            self.circuit_breaker = SimpleNamespace(consecutive_failures=0)
+            self.fail = fail
+
+        async def generate(self, **_kwargs: Any) -> ProviderResponse:
+            attempted.append(self.name)
+            if self.fail:
+                raise RuntimeError("primary text backend failed")
+            return ProviderResponse(content=f"response from {self.name}", model=self.name)
+
+    text_cfg = SimpleNamespace(allowed_tasks=None)
+    live_cfg = SimpleNamespace(allowed_tasks=["voice"])
+    settings = SimpleNamespace(
+        providers=SimpleNamespace(
+            cascades={"fast_chat": ["text_backend"], "voice": ["gemini_live"]},
+            backends={"text_backend": text_cfg, "gemini_live": live_cfg},
+        )
+    )
+    text_provider = FakeProvider("text_backend", fail=True)
+    live_provider = FakeProvider("gemini_live", allowed_tasks=["voice"])
+    router = object.__new__(ParetoRouter)
+    router.settings = settings
+    router.strict_local_availability = False
+    router._providers = {
+        "text_backend": text_provider,
+        "gemini_live": live_provider,
+    }
+    router._metrics = {
+        "text_backend": ProviderMetrics(default_latency_ms=100.0),
+        "gemini_live": ProviderMetrics(default_latency_ms=100.0),
+    }
+    router._ollama_probed_models = ["mock-local-model"]
+    router._initialized = True
+
+    with pytest.raises(RuntimeError, match="All providers exhausted"):
+        await router.execute_with_fallback(
+            task="fast_chat",
+            messages=[Message(role="user", content="Hi")],
+        )
+
+    assert attempted == ["text_backend"], (
+        "A voice-scoped backend must not be pulled into the automatic fallback pool for text chat."
+    )
+
+    text_provider.fail = False
+    attempted.clear()
+    response = await router.execute_with_fallback(
+        task="voice",
+        messages=[Message(role="user", content="Hello")],
+    )
+    assert response.content == "response from gemini_live"
+    assert attempted == ["gemini_live"]
