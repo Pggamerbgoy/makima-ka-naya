@@ -176,8 +176,10 @@ def parse_docstring_params(doc: Optional[str]) -> Dict[str, str]:
     if not doc:
         return {}
 
+    # Normalize nested/local tool docstrings before matching Args fields.
+    # Extra source indentation otherwise prevents descriptions from reaching schemas.
     params: Dict[str, str] = {}
-    lines = doc.splitlines()
+    lines = inspect.cleandoc(doc).splitlines()
 
     # 1. Sphinx / reST style: :param name: description
     sphinx_pattern = re.compile(r"^\s*:param\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)$")
