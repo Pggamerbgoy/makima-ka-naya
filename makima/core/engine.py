@@ -266,32 +266,49 @@ class HermesAgentEngine:
         active_task: str = "general",
         preferred_backend: Optional[str] = None,
         max_output_tokens: int = 4096,
-        max_allowed_history: int = 400_000,
+        max_allowed_history: Optional[int] = None,
     ) -> int:
         """
-        Dynamically computes the available token budget for rehydrating episodic history.
-        Deducts system instructions, tool declarations, user prompt, and completion reserve
-        from the active model's configured context window.
-        """
-        model_name, context_limit = self._resolve_model_and_context_limit(active_task, preferred_backend)
+        Computes the history budget from the selected model's real context limit.
 
-        # Count overhead tokens
+        The budget reserves space for the system prompt, current user prompt, tools,
+        completion, and safety headroom. By default there is no arbitrary history
+        ceiling: the remaining context is available for history. Callers may supply
+        max_allowed_history as an explicit operational cap.
+        """
+        _, context_limit = self._resolve_model_and_context_limit(active_task, preferred_backend)
+
+        counter = getattr(self.compressor, "counter", None)
+        count_text = getattr(counter, "count_text", None)
         effective_sys = system_prompt if system_prompt is not None else getattr(self, "DEFAULT_SYSTEM_PROMPT", "")
-        sys_tokens = self.compressor.counter.count_text(effective_sys) if hasattr(self.compressor, "counter") else (len(effective_sys) // 4)
-        prompt_tokens = (self.compressor.counter.count_text(current_prompt) if hasattr(self.compressor, "counter") else (len(current_prompt) // 4)) if current_prompt else 0
+        sys_tokens = count_text(effective_sys) if callable(count_text) else (len(effective_sys) // 4)
+        prompt_tokens = (
+            count_text(current_prompt) if callable(count_text) else (len(current_prompt) // 4)
+        ) if current_prompt else 0
+
         tool_tokens = 0
         if tool_schemas:
             try:
-                tool_tokens = len(json.dumps(tool_schemas, separators=(",", ":"))) // 4
+                serialized_schemas = json.dumps(
+                    tool_schemas,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    default=str,
+                )
+                tool_tokens = count_text(serialized_schemas) if callable(count_text) else (len(serialized_schemas) // 4)
             except Exception:
                 tool_tokens = len(tool_schemas) * 120
 
-        reserved_output = max_output_tokens
+        reserved_output = max(0, int(max_output_tokens))
         headroom = max(2048, int(context_limit * 0.10))
-
-        available = context_limit - (sys_tokens + prompt_tokens + tool_tokens + reserved_output + headroom)
-        history_budget = max(1000, min(available, max_allowed_history))
-        return history_budget
+        available = max(
+            0,
+            context_limit - (sys_tokens + prompt_tokens + tool_tokens + reserved_output + headroom),
+        )
+        if max_allowed_history is not None:
+            available = min(available, max(0, int(max_allowed_history)))
+        return available
 
     @classmethod
     def _strip_spoofed_tool_traces(cls, text: str) -> str:
@@ -830,42 +847,66 @@ class HermesAgentEngine:
         if messages:
             working_messages.extend(messages)
         elif session_id and self.episodic_memory is not None:
-            # Rehydrate conversation window using model-aware token budget
-            # rather than an arbitrary fixed limit=100 message cap.
+            # Rehydrate history from the actual remaining model context budget.
+            # The current prompt, system prompt, tool schemas, completion reserve, and
+            # safety headroom are deducted before any episodic rows are loaded.
             history_budget = self._calculate_history_token_budget(
                 system_prompt=effective_system_prompt,
                 current_prompt=prompt,
                 tool_schemas=tool_catalog_schemas,
                 active_task=active_task,
                 preferred_backend=preferred_backend,
+                max_output_tokens=max_tokens if max_tokens is not None else 4096,
             )
-            try:
+            if history_budget > 0:
                 try:
-                    history_messages = await self.episodic_memory.get_recent_messages(
-                        session_id=session_id,
-                        max_tokens=history_budget,
+                    try:
+                        history_messages = await self.episodic_memory.get_recent_messages(
+                            session_id=session_id,
+                            max_tokens=history_budget,
+                            token_counter=getattr(self.compressor, "counter", None),
+                        )
+                    except TypeError:
+                        # Support adapters that accept max_tokens but not token_counter.
+                        try:
+                            history_messages = await self.episodic_memory.get_recent_messages(
+                                session_id=session_id,
+                                max_tokens=history_budget,
+                            )
+                        except TypeError:
+                            # Do not fall back to a fixed message count: that could overflow
+                            # the model context when the calculated history budget is small.
+                            logger.warning(
+                                "Episodic adapter for session '%s' does not support token-budget history loading; "
+                                "skipping history to preserve the context limit.",
+                                session_id,
+                            )
+                            history_messages = []
+                    working_messages.extend(history_messages)
+                    logger.info(
+                        "Rehydrated %d history messages for session '%s' using token budget: %d tokens",
+                        len(history_messages),
+                        session_id,
+                        history_budget,
                     )
-                except TypeError:
-                    # Graceful fallback for mock episodic stores with legacy signature
-                    history_messages = await self.episodic_memory.get_recent_messages(
-                        session_id=session_id,
-                        limit=100,
-                    )
-                working_messages.extend(history_messages)
+                except Exception as exc:
+                    logger.debug("Episodic history load skipped for %s: %s", session_id, exc)
+            else:
                 logger.info(
-                    "Rehydrated %d history messages for session '%s' using token budget: %d tokens",
-                    len(history_messages),
+                    "Skipping episodic history for session '%s': no context tokens remain after fixed prompt/tool reserves.",
                     session_id,
-                    history_budget,
                 )
-            except Exception as exc:
-                logger.debug("Episodic history load skipped for %s: %s", session_id, exc)
 
         # Track the first message created by this run so both the user prompt
         # and the resulting assistant/tool turns are persisted.
         messages_before = len(working_messages)
+        # Keep an append-only ledger of messages produced by this run. The working
+        # history may later be compressed, so persistence must not rely on its indices.
+        run_messages: List[Message] = []
         if prompt:
-            working_messages.append(Message(role="user", content=prompt))
+            user_message = Message(role="user", content=prompt)
+            working_messages.append(user_message)
+            run_messages.append(user_message)
 
         if not working_messages:
             raise ValueError("HermesAgentEngine requires either 'prompt' or non-empty 'messages'.")
@@ -1000,6 +1041,7 @@ class HermesAgentEngine:
                 tool_calls=response.tool_calls if response.tool_calls else None,
             )
             working_messages.append(assistant_msg)
+            run_messages.append(assistant_msg)
 
             # Optional turn-end observer hook
             if on_turn_end:
@@ -1050,7 +1092,7 @@ class HermesAgentEngine:
 
                 # Fire-and-forget: persist new turns to EpisodicMemory
                 if session_id and self.episodic_memory is not None:
-                    new_msgs = working_messages[messages_before:]
+                    new_msgs = list(run_messages)
                     exec_meta = {
                         "tool_calls_count": total_tool_calls,
                         "model_used": last_model_used,
@@ -1219,6 +1261,7 @@ class HermesAgentEngine:
                     name=call.name,
                 )
                 working_messages.append(tool_msg)
+                run_messages.append(tool_msg)
 
         # 5b. Final Synthesis Pass on turn limit: give the LLM one tool-free pass to summarize
         # all gathered tool results into a helpful answer rather than discarding work.
@@ -1251,10 +1294,12 @@ class HermesAgentEngine:
                 clean_content = self._sanitize_degenerate_post_tool_greeting(
                     clean_content, working_messages, total_tool_calls
                 )
-                working_messages.append(Message(role="assistant", content=clean_content))
+                synthesis_message = Message(role="assistant", content=clean_content)
+                working_messages.append(synthesis_message)
+                run_messages.append(synthesis_message)
 
                 if session_id and self.episodic_memory is not None:
-                    new_msgs = working_messages[messages_before:]
+                    new_msgs = list(run_messages)
                     synth_meta = {
                         "tool_calls_count": total_tool_calls,
                         "model_used": synth_resp.model or last_model_used,
@@ -1322,7 +1367,7 @@ class HermesAgentEngine:
 
         # Fire-and-forget: persist new turns even on max_turns cutoff
         if session_id and self.episodic_memory is not None:
-            new_msgs = working_messages[messages_before:]
+            new_msgs = list(run_messages)
             cutoff_meta = {
                 "tool_calls_count": total_tool_calls,
                 "model_used": last_model_used,
