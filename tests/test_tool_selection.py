@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any, Iterable, List
 
@@ -430,3 +431,69 @@ async def test_custom_schema_set_does_not_borrow_parallel_safety_from_global_reg
     )
 
     assert max_active == 1, "A raw schema list has no safety metadata; calls must be serialized."
+
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_uses_injected_gateway_for_voice_tool_execution(monkeypatch: Any) -> None:
+    from makima.voice import gemini_live
+
+    registry = ToolRegistry(name="voice-gateway-test")
+    executions: list[str] = []
+
+    async def dangerous_action(target: str) -> dict[str, bool]:
+        executions.append(target)
+        return {"success": True}
+
+    registry.register(
+        dangerous_action,
+        name="voice_test_action",
+        description="Test-only side effect.",
+        tags=["control"],
+    )
+    disabled = {"voice_test_action"}
+    gateway = ToolExecutionGateway(registry, lambda: disabled)
+
+    class FakeLiveSocket:
+        def __init__(self) -> None:
+            self.sent: list[Any] = []
+
+        async def receive(self):
+            yield SimpleNamespace(
+                server_content=None,
+                tool_call=SimpleNamespace(
+                    function_calls=[
+                        SimpleNamespace(
+                            name="voice_test_action",
+                            args={"target": "must-not-run"},
+                            id="voice-call-1",
+                        )
+                    ]
+                ),
+            )
+
+        async def send(self, *, input: Any) -> None:
+            self.sent.append(input)
+
+    class FakeFunctionResponse:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class FakeToolResponse:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(gemini_live.types, "FunctionResponse", FakeFunctionResponse)
+    monkeypatch.setattr(gemini_live.types, "LiveClientToolResponse", FakeToolResponse)
+
+    session = gemini_live.GeminiLiveSession(execution_gateway=gateway)
+    session._session = FakeLiveSocket()
+    session._is_active = True
+    session._available_tool_names = {"voice_test_action"}
+
+    events = [event async for event in session.receive_events()]
+
+    assert executions == [], "Disabled voice tools must not run through a direct registry bypass."
+    tool_result = next(event for event in events if event["type"] == "tool_result")
+    assert "[TOOL_DISABLED: voice_test_action]" in str(tool_result["result"])
+    assert session._session.sent, "The gateway result must be returned to Gemini as a function response."
