@@ -181,9 +181,21 @@ class ParetoRouter:
         self._ollama_probed_models = []
         return []
 
+    def _backend_allowed_for_task(self, backend_name: str, task: str) -> bool:
+        """Enforce optional backend task scopes across cascades, preferences, and fallback."""
+        config = self.settings.providers.backends.get(backend_name)
+        if config is None:
+            provider = self._providers.get(backend_name)
+            config = getattr(provider, "config", None)
+        allowed_tasks = getattr(config, "allowed_tasks", None)
+        if allowed_tasks is None:
+            return True
+        allowed = {str(item).strip().lower() for item in allowed_tasks}
+        return str(task).strip().lower() in allowed
+
     def get_ranked_candidates(self, task: str = "fast_chat") -> List[ParetoCandidate]:
         """
-        Evaluates and ranks all candidates for a specific task cascade using Pareto criteria.
+        Evaluates and ranks candidates compatible with a task cascade using Pareto criteria.
         """
         cascade = self.settings.providers.cascades.get(task, [])
         if not cascade:
@@ -193,7 +205,7 @@ class ParetoRouter:
         candidates: List[ParetoCandidate] = []
         for rank, name in enumerate(cascade):
             provider = self._providers.get(name)
-            if not provider:
+            if not provider or not self._backend_allowed_for_task(name, task):
                 continue
 
             config = provider.config
@@ -269,7 +281,10 @@ class ParetoRouter:
             preferred = next((c for c in candidates if c.name == preferred_backend), None)
             if preferred is not None:
                 candidates = [preferred] + [c for c in candidates if c is not preferred]
-            elif preferred_backend in self._providers:
+            elif (
+                preferred_backend in self._providers
+                and self._backend_allowed_for_task(preferred_backend, task)
+            ):
                 prov = self._providers[preferred_backend]
                 if prov.is_available:
                     pref_cand = ParetoCandidate(
@@ -288,7 +303,11 @@ class ParetoRouter:
         seen_names = {c.name for c in candidates}
         extra_available: List[ParetoCandidate] = []
         for rank_idx, (b_name, b_prov) in enumerate(self._providers.items(), start=len(candidates)):
-            if b_name not in seen_names and b_prov.is_available:
+            if (
+                b_name not in seen_names
+                and b_prov.is_available
+                and self._backend_allowed_for_task(b_name, task)
+            ):
                 extra_available.append(
                     ParetoCandidate(
                         name=b_name,
