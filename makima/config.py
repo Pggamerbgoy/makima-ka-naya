@@ -62,6 +62,9 @@ class BackendConfig(BaseModel):
     base_url: Optional[str] = None
     latency_tier: str = "standard"
     context_limit: int = 286000
+    # Optional task scope for specialized backends. None means general-purpose;
+    # a configured list is a hard compatibility boundary for routing/fallback.
+    allowed_tasks: Optional[List[str]] = None
 
     @property
     def api_key(self) -> Optional[str]:
