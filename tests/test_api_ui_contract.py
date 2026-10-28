@@ -229,26 +229,45 @@ def test_rest_chat_respects_disabled_tool_gateway(tmp_path: Path) -> None:
         tags=["control"],
     )
 
-    router = ContractRouter()
-    router.queued_responses = [
-        ProviderResponse(
-            content="",
-            model="contract-model",
-            tool_calls=[
-                ToolCall(
-                    id="disabled-rest-call",
-                    name="destructive_demo",
-                    arguments={"target": "must-not-run"},
-                )
-            ],
-            finish_reason="tool_calls",
-        ),
-        ProviderResponse(
-            content="The disabled action was not executed.",
-            model="contract-model",
-            finish_reason="stop",
-        ),
-    ]
+    class DisabledToolRouter(ContractRouter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.responses = [
+                ProviderResponse(
+                    content="",
+                    model="contract-model",
+                    tool_calls=[
+                        ToolCall(
+                            id="disabled-rest-call",
+                            name="destructive_demo",
+                            arguments={"target": "must-not-run"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ProviderResponse(
+                    content="The disabled action was not executed.",
+                    model="contract-model",
+                    finish_reason="stop",
+                ),
+            ]
+
+        async def execute_with_fallback(
+            self,
+            task: str,
+            messages: List[Message],
+            system_prompt: Optional[str] = None,
+            tools: Optional[List[Dict[str, Any]]] = None,
+            temperature: float = 0.7,
+            max_tokens: Optional[int] = None,
+            preferred_backend: Optional[str] = None,
+            **kwargs: Any,
+        ) -> ProviderResponse:
+            self.calls = getattr(self, "calls", [])
+            self.calls.append({"tools": tools})
+            return self.responses.pop(0)
+
+    router = DisabledToolRouter()
     engine = HermesAgentEngine(router=router)
     client = TestClient(
         create_app(
