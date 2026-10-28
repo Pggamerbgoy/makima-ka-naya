@@ -596,3 +596,16 @@ async def test_configured_tool_concurrency_is_honored(
 
     assert result.completed is True
     assert max_active <= limit if enabled else max_active == 1
+
+
+
+def test_gemini_live_is_reserved_for_voice_routing() -> None:
+    from makima.config import get_settings
+
+    settings = get_settings()
+    for task_name in ("fast_chat", "code", "deep_reasoning", "vision"):
+        assert "gemini_live" not in settings.providers.cascades[task_name]
+        assert "gemini_3_8_live" not in settings.providers.cascades[task_name]
+
+    assert settings.providers.cascades["voice"] == ["gemini_live"]
+    assert "gemini_3_8_live" not in settings.providers.backends
