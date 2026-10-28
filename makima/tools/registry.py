@@ -140,7 +140,13 @@ class CapabilityToolRegistry:
         return [tool.name for tool in self.list_tools(tags=tags)]
 
     def get_schemas(self, format: str = "openai", tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
+        available_tools = self.list_tools(tags=tags)
+        available_names = {tool.name for tool in available_tools}
+        return [
+            tool.to_schema(format=format)
+            for tool in available_tools
+            if not tool.fallback_for or tool.fallback_for not in available_names
+        ]
 
     async def execute(self, name: str, arguments: Optional[Dict[str, Any]] = None, catch_errors: bool = True) -> Any:
         tool = self.registry.get(name)
