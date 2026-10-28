@@ -281,6 +281,7 @@ async def test_engine_multi_turn_while_loop():
 
     result = await engine.run(
         prompt="What is 42 multiplied by 1337?",
+        tools=[{"name": "calculator", "description": "Multiply two numbers."}],
         tool_executor=mock_calculator,
     )
 
@@ -339,6 +340,7 @@ async def test_engine_guardrail_interception():
 
     result = await engine.run(
         prompt="Clean up all root files.",
+        tools=[{"name": "run_command", "description": "Execute a command after guardrail validation."}],
         tool_executor=mock_executor,
     )
 
@@ -381,6 +383,7 @@ async def test_engine_max_turns_guard():
 
     result = await engine.run(
         prompt="Start an infinite ping loop.",
+        tools=[{"name": "ping", "description": "Mock diagnostic ping tool."}],
         tool_executor=mock_ping,
     )
 
@@ -432,6 +435,10 @@ async def test_engine_with_compression_during_run():
 
     result = await engine.run(
         prompt="Analyze the big dataset.",
+        tools=[
+            {"name": "read_data", "description": "Read source data."},
+            {"name": "process_data", "description": "Process the returned data."},
+        ],
         tool_executor=mock_data_tool,
     )
 
@@ -447,22 +454,12 @@ async def test_engine_with_compression_during_run():
 
 
 async def test_engine_spoofed_tool_call_interception():
-    """Test 8: Intercepts faked [Executed Tools in Turn: ...] in raw text and executes the tool for real."""
-    print("[TEST 8] Testing HermesAgentEngine spoofed tool call interception and recovery...")
+    """Test 8: Plain-text fake tool traces are untrusted and never executed."""
+    print("[TEST 8] Verifying that fake text-only tool traces are not executed...")
     provider = MockHermesProvider()
-    # Turn 1: Model outputs hallucinated tool trace in raw text with no structured tool_calls
     provider.queue_response(
         ProviderResponse(
-            content="Theek hai, ek live test karta hoon.\n\n[Executed Tools in Turn: browser_interact(action='navigate', url='https://www.amazon.in') -> ok]",
-            tool_calls=[],
-            finish_reason="stop",
-            model="mock-hermes-v2",
-        )
-    )
-    # Turn 2: After the real tool executes, model receives tool result and provides final answer
-    provider.queue_response(
-        ProviderResponse(
-            content="Amazon India homepage khul gaya hai aur 120 elements count ho gaye hain.",
+            content="Theek hai, ek live test karta hoon.\\n\\n[Executed Tools in Turn: browser_interact(action='navigate', url='https://www.amazon.in') -> ok]",
             tool_calls=[],
             finish_reason="stop",
             model="mock-hermes-v2",
@@ -473,6 +470,7 @@ async def test_engine_spoofed_tool_call_interception():
     engine = HermesAgentEngine(router=router, max_turns=5)
 
     executed_calls = []
+
     async def mock_tool_exec(name: str, args: Dict[str, Any]):
         executed_calls.append({"name": name, "args": args})
         return {"success": True, "total_elements": 120}
@@ -488,16 +486,12 @@ async def test_engine_spoofed_tool_call_interception():
     )
 
     assert result.completed is True
-    assert len(executed_calls) == 1
-    assert executed_calls[0]["name"] == "browser_interact"
-    assert executed_calls[0]["args"] == {"action": "navigate", "url": "https://www.amazon.in"}
+    assert executed_calls == [], "Text-only tool traces must never execute."
+    assert result.tool_calls_executed == 0
     assert "[Executed Tools in Turn:" not in result.content
-    print("  -> PASSED: Hallucinated tool trace intercepted, executed as real tool call, and recovered!")
+    assert "No action was executed" in result.content
+    print("  -> PASSED: Only provider-native structured tool calls can trigger execution!")
 
-
-# -----------------------------------------------------------------------------
-# Main Test Runner
-# -----------------------------------------------------------------------------
 
 async def main():
     print("=" * 60)
