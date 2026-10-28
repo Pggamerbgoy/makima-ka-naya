@@ -1074,8 +1074,22 @@ class HermesAgentEngine:
 
                 return result
 
-            # 5. Dispatch requested tool calls with intelligent parallel batching
+            # 5. Dispatch requested tool calls with configured concurrency limits.
+            concurrency_enabled = True
+            max_parallel_tools = 8
+            try:
+                from makima.config import get_settings
+                concurrency_cfg = get_settings().tools.concurrency
+                concurrency_enabled = bool(concurrency_cfg.enabled)
+                max_parallel_tools = max(1, int(concurrency_cfg.max_concurrency))
+            except Exception as exc:
+                logger.debug("Tool concurrency settings unavailable; using safe defaults: %s", exc)
+
+            parallel_semaphore = asyncio.Semaphore(max_parallel_tools)
+
             def _is_call_parallel_safe(call_name: str) -> bool:
+                if not concurrency_enabled:
+                    return False
                 # Never borrow safety metadata from the global registry when a caller
                 # supplied a different schema set or custom executor. Unknown defaults
                 # to sequential execution.
@@ -1166,10 +1180,15 @@ class HermesAgentEngine:
                 if is_safe and len(batch) > 1:
                     names_log = [c.name for _, c in batch]
                     logger.debug(f"Executing {len(batch)} parallel-safe tool calls concurrently: {names_log}")
-                    tasks = [
-                        self._execute_tool_call(c, effective_executor, allowed_tool_names=active_tool_names)
-                        for _, c in batch
-                    ]
+                    async def _execute_parallel_limited(tool_call: ToolCall) -> str:
+                        async with parallel_semaphore:
+                            return await self._execute_tool_call(
+                                tool_call,
+                                effective_executor,
+                                allowed_tool_names=active_tool_names,
+                            )
+
+                    tasks = [_execute_parallel_limited(c) for _, c in batch]
                     batch_results = await asyncio.gather(*tasks, return_exceptions=True)
                     for (orig_idx, c), res in zip(batch, batch_results):
                         total_tool_calls += 1
