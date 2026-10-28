@@ -306,8 +306,10 @@ tools:
     enabled: true
     embedding_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     minimum_similarity: 0.15
-    minimum_candidates: 8
-    max_candidates: 16
+    minimum_candidates: 24
+    # Expose all current tool schemas (68+) by default; narrow only once the
+    # catalogue grows beyond this. Missing schemas cannot be selected by the LLM.
+    max_candidates: 96
 
   sandbox:
     mode: "local_clamped" # "local_clamped" or "docker"
