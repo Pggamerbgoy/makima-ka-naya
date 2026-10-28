@@ -762,9 +762,21 @@ def create_app(
     async def list_tools(request: Request) -> Dict[str, Any]:
         """Returns list of registered tools and their synthesized JSON schemas."""
         reg: ToolRegistry = request.app.state.registry or get_registry(auto_discover=True)
-        schemas = reg.get_schemas(format="openai")
+        # The UI must show disabled primary tools so they can be re-enabled, while
+        # revealing their conditional fallbacks if the primary is currently disabled.
+        all_tool_objects = reg.list_tools()
+        disabled_names = set(request.app.state.disabled_tools)
+        enabled_names = {
+            tool.name for tool in all_tool_objects if tool.name not in disabled_names
+        }
+        visible_tool_objects = [
+            tool for tool in all_tool_objects
+            if not getattr(tool, "fallback_for", None)
+            or str(tool.fallback_for) not in enabled_names
+        ]
+        schemas = [tool.to_schema(format="openai") for tool in visible_tool_objects]
         tools = []
-        tool_objects = {tool.name: tool for tool in reg.list_tools()}
+        tool_objects = {tool.name: tool for tool in all_tool_objects}
         for schema in schemas:
             fn = schema.get("function", {})
             name = fn.get("name", "")
