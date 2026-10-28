@@ -246,7 +246,14 @@ class ToolExecutionGateway:
         format: str = "openai",
         tags: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        return [tool.to_schema(format=format) for tool in self.list_tools(tags=tags)]
+        available_tools = self.list_tools(tags=tags)
+        available_names = {str(tool.name) for tool in available_tools}
+        return [
+            tool.to_schema(format=format)
+            for tool in available_tools
+            if not getattr(tool, "fallback_for", None)
+            or str(tool.fallback_for) not in available_names
+        ]
 
     def is_parallel_safe(self, name: str) -> bool:
         if not self.is_enabled(name):
