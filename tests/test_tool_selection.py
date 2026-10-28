@@ -609,3 +609,37 @@ def test_gemini_live_is_reserved_for_voice_routing() -> None:
 
     assert settings.providers.cascades["voice"] == ["gemini_live"]
     assert "gemini_3_8_live" not in settings.providers.backends
+
+
+
+@pytest.mark.asyncio
+async def test_fallback_tool_schema_is_hidden_only_when_primary_is_available() -> None:
+    registry = ToolRegistry(name="fallback-selection-test")
+
+    def primary_lookup(query: str) -> dict[str, str]:
+        return {"source": "primary", "query": query}
+
+    def fallback_lookup(query: str) -> dict[str, str]:
+        return {"source": "fallback", "query": query}
+
+    registry.register(primary_lookup, name="primary_lookup", tags=["search"])
+    registry.register(
+        fallback_lookup,
+        name="fallback_lookup",
+        tags=["search"],
+        fallback_for="primary_lookup",
+    )
+
+    schemas = registry.get_schemas()
+    assert [item["function"]["name"] for item in schemas] == ["primary_lookup"]
+    assert await registry.execute("fallback_lookup", {"query": "still callable"}) == {
+        "source": "fallback",
+        "query": "still callable",
+    }
+
+    disabled_primary_gateway = ToolExecutionGateway(
+        registry,
+        disabled_tools={"primary_lookup"},
+    )
+    fallback_schemas = disabled_primary_gateway.get_schemas()
+    assert [item["function"]["name"] for item in fallback_schemas] == ["fallback_lookup"]
