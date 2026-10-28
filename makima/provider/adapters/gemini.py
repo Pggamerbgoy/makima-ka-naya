@@ -501,6 +501,31 @@ class GeminiProvider(BaseProvider):
             out["type"] = "object"
         return out
 
+    @staticmethod
+    def _compact_live_system_instruction(system_prompt: Optional[str]) -> str:
+        """
+        Compresses heavy desktop/code instructions into a lean voice prompt for Gemini 3.8 Live,
+        protecting the strict 65,000 TPM free-tier quota while leaving tool definitions untouched.
+        """
+        base_instruction = (
+            "You are Makima, a concise and proactive voice AI in Jarvis Mode. "
+            "Speak directly and conversationally without markdown, code blocks, or verbose preambles. "
+            "Invoke tools directly for media, browser, and OS actions.\n"
+            "RULES:\n"
+            "1. For '[SYSTEM_EVENT]' prompts: take action or give a 1-sentence spoken update if useful; remain completely silent if trivial or non-actionable.\n"
+            "2. Spoken output must be natural and brief; never recite long URLs, code, or file paths aloud.\n"
+            "3. For songs/audio use play_song. For anime/video viewing use browser_interact (never play_song); use user's preferred streaming site or requested URL."
+        )
+        if not system_prompt:
+            return base_instruction
+        if len(system_prompt.strip()) < 500:
+            return system_prompt
+
+        # Extract any dynamic memory context if present (<memory>...</memory>)
+        memory_match = re.search(r"<memory>.*?</memory>", system_prompt, flags=re.DOTALL)
+        memory_part = f"\n{memory_match.group(0)}" if memory_match else ""
+        return f"{base_instruction}{memory_part}"
+
     async def _generate_live(
         self,
         messages: List[Message],
@@ -535,12 +560,13 @@ class GeminiProvider(BaseProvider):
         if "extended-thinking" in model_lower:
             thinking_cfg = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
 
+        lean_instruction = self._compact_live_system_instruction(system_prompt)
         tools_config = [types.Tool(function_declarations=function_declarations)] if function_declarations else None
         live_config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=tools_config,
-            system_instruction=system_prompt,
+            system_instruction=lean_instruction,
             thinking_config=thinking_cfg,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede"))
@@ -548,7 +574,7 @@ class GeminiProvider(BaseProvider):
         )
 
         # Apply sliding window TPM protection before opening WebSocket
-        est_tokens = len(system_prompt or "") // 3 + len(function_declarations) * 90 + 200
+        est_tokens = len(lean_instruction) // 3 + len(function_declarations) * 90 + 200
         await _GLOBAL_LIVE_TPM_TRACKER.acquire(est_tokens)
 
         cm = client.aio.live.connect(model=self.config.model, config=live_config)
@@ -648,12 +674,13 @@ class GeminiProvider(BaseProvider):
         if "extended-thinking" in model_lower:
             thinking_cfg = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
 
+        lean_instruction = self._compact_live_system_instruction(system_prompt)
         tools_config = [types.Tool(function_declarations=function_declarations)] if function_declarations else None
         live_config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=tools_config,
-            system_instruction=system_prompt,
+            system_instruction=lean_instruction,
             thinking_config=thinking_cfg,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede"))
@@ -661,7 +688,7 @@ class GeminiProvider(BaseProvider):
         )
 
         # Apply sliding window TPM protection before opening WebSocket
-        est_tokens = len(system_prompt or "") // 3 + len(function_declarations) * 90 + 200
+        est_tokens = len(lean_instruction) // 3 + len(function_declarations) * 90 + 200
         await _GLOBAL_LIVE_TPM_TRACKER.acquire(est_tokens)
 
         cm = client.aio.live.connect(model=self.config.model, config=live_config)
