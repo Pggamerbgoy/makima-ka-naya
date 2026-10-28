@@ -102,8 +102,14 @@ def list_processes(
 
 @tool(
     name="get_process_info",
-    description="Retrieve comprehensive details for a specific process by PID or process name.",
+    description="Read detailed runtime properties for one process identified by PID or executable name, including command line, parent PID, CPU/RAM, and handles.",
     tags=["os", "process", "monitoring"],
+    purpose="Inspect a particular process precisely before deciding whether any process action is needed.",
+    capabilities=["Resolve one process by PID or exact/partial name and return detailed properties."],
+    use_when=["The user asks for details about a specific process or the target needs verification before termination."],
+    avoid_when=["The user asks for the current overall system load; prefer get_system_stats.","The user asks to close an application normally; prefer terminate_application rather than inspecting/terminating arbitrary processes."],
+    examples=["Inspect the process ID of a named executable.","Check the command line for a particular PID."],
+    side_effect="Read-only; does not terminate or alter the process.",
 )
 def get_process_info(
     pid: Optional[int] = None,
