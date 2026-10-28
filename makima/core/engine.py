@@ -713,7 +713,10 @@ class HermesAgentEngine:
 
         # Resolve the complete currently enabled tool catalogue once for this request.
         # Done before history loading so tool schemas can be deducted from the token budget.
+        # Primary schemas omit conditional fallback tools during normal turns;
+        # the full catalogue is retained for explicit recovery turns after a miss/error.
         tool_catalog_schemas: Optional[List[Dict[str, Any]]] = None
+        all_tool_catalog_schemas: Optional[List[Dict[str, Any]]] = None
         tool_metadata: Dict[str, Any] = {}
         effective_executor = tool_executor
 
@@ -727,6 +730,15 @@ class HermesAgentEngine:
                         tool_catalog_schemas = tools.get_schemas()
                 except Exception:
                     tool_catalog_schemas = tools.get_schemas()
+                if hasattr(tools, "get_all_schemas") and callable(tools.get_all_schemas):
+                    try:
+                        all_sig = inspect.signature(tools.get_all_schemas)
+                        if "tags" in all_sig.parameters and tool_tags is not None:
+                            all_tool_catalog_schemas = tools.get_all_schemas(tags=tool_tags)
+                        else:
+                            all_tool_catalog_schemas = tools.get_all_schemas()
+                    except Exception as exc:
+                        logger.debug("Full schema catalogue unavailable; recovery will use primary schemas: %s", exc)
                 if effective_executor is None and hasattr(tools, "execute"):
                     effective_executor = tools.execute
 
@@ -746,6 +758,7 @@ class HermesAgentEngine:
                         logger.debug("Tool metadata lookup skipped: %s", exc)
             elif isinstance(tools, list):
                 tool_catalog_schemas = tools
+                all_tool_catalog_schemas = tools
 
         if tool_catalog_schemas:
             seen_names = set()
@@ -775,6 +788,36 @@ class HermesAgentEngine:
             tool_catalog_schemas = deduped_schemas or None
         else:
             tool_catalog_schemas = None
+
+        # Normalize the recovery catalogue separately: unlike normal schemas, it
+        # intentionally includes conditional fallback tools but still preserves order.
+        if all_tool_catalog_schemas:
+            seen_all_names = set()
+            deduped_all_schemas = []
+            for schema in all_tool_catalog_schemas:
+                if not isinstance(schema, dict):
+                    continue
+                function_schema = schema.get("function")
+                schema_name = (
+                    function_schema.get("name")
+                    if isinstance(function_schema, dict)
+                    else schema.get("name")
+                )
+                if schema_name:
+                    if schema_name in seen_all_names:
+                        continue
+                    seen_all_names.add(schema_name)
+                deduped_all_schemas.append(schema)
+            deduped_all_schemas.sort(
+                key=lambda schema: (
+                    schema.get("function", {}).get("name", "")
+                    if isinstance(schema.get("function"), dict)
+                    else schema.get("name", "")
+                )
+            )
+            all_tool_catalog_schemas = deduped_all_schemas or None
+        else:
+            all_tool_catalog_schemas = tool_catalog_schemas
 
         # Normalize working messages
         working_messages: List[Message] = []
@@ -907,9 +950,10 @@ class HermesAgentEngine:
 
             # 2. Query provider along Pareto frontier with automatic failover
             active_tools_for_turn = tool_catalog_schemas
-            if active_tools_for_turn and force_full_tool_catalog_next_turn:
+            if force_full_tool_catalog_next_turn:
+                active_tools_for_turn = all_tool_catalog_schemas or tool_catalog_schemas
                 logger.warning(
-                    "Expanding tool schemas from semantic subset to full catalogue after a hidden-tool request."
+                    "Expanding tool schemas to the full enabled catalogue after a hidden-tool request or tool failure."
                 )
                 force_full_tool_catalog_next_turn = False
             elif active_tools_for_turn:
@@ -1128,7 +1172,7 @@ class HermesAgentEngine:
                 return name.split(":")[-1] if ":" in name else name
 
             full_catalog_names: Set[str] = set()
-            for schema in tool_catalog_schemas or []:
+            for schema in all_tool_catalog_schemas or tool_catalog_schemas or []:
                 if not isinstance(schema, dict):
                     continue
                 function_schema = schema.get("function")
@@ -1202,6 +1246,28 @@ class HermesAgentEngine:
                         logger.debug(f"Executing tool call sequentially: {c.name} (id={c.id})")
                         tool_output = await self._execute_tool_call(c, effective_executor, allowed_tool_names=active_tool_names)
                         ordered_outputs[orig_idx] = tool_output
+
+            # If a primary tool returns a clear operational failure, expose the full
+            # enabled catalogue on the next turn so a registered fallback can be selected.
+            def _tool_output_signals_failure(output: Optional[str]) -> bool:
+                text = output or ""
+                if text.startswith(("[TOOL_FAILED:", "[TOOL_NOT_AVAILABLE:", "[TOOL_NOT_FOUND:")):
+                    return True
+                try:
+                    payload = json.loads(text)
+                except (TypeError, ValueError):
+                    return False
+                if not isinstance(payload, dict):
+                    return False
+                status = str(payload.get("status") or "").strip().lower()
+                return (
+                    payload.get("success") is False
+                    or bool(payload.get("error"))
+                    or status in {"error", "failed", "failure"}
+                )
+
+            if any(_tool_output_signals_failure(output) for output in ordered_outputs):
+                force_full_tool_catalog_next_turn = True
 
             # Multi-pattern tool invocation loop detection
             try:
