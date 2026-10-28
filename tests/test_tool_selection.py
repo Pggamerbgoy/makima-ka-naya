@@ -819,3 +819,31 @@ def test_custom_plugin_discovery_does_not_skip_builtin_catalogue() -> None:
     assert registry._discovered is False, (
         "Discovering a custom module must not mark the default makima.tools catalogue as loaded."
     )
+
+
+
+@pytest.mark.asyncio
+async def test_default_catalogue_uses_high_recall_shortlist_without_sending_every_schema() -> None:
+    from makima.config import get_settings
+
+    selection_config = get_settings().tools.selection
+    all_schemas = [schema("close_application", "Close a selected desktop application.")]
+    all_schemas.extend(
+        schema(f"catalogue_tool_{i:02d}", f"Tool catalogue entry {i}.")
+        for i in range(47)
+    )
+    assert len(all_schemas) > selection_config.max_candidates
+
+    selector = ToolSelectionService(
+        selection_config,
+        embedding_factory=lambda _model: DirectionalEmbedding(),
+    )
+    selected = await selector.select_schemas(
+        all_schemas,
+        "Keep the audio running and close the desktop application.",
+    )
+
+    assert selected is not None
+    assert selection_config.minimum_candidates <= len(selected) <= selection_config.max_candidates
+    assert len(selected) < len(all_schemas)
+    assert any(item["function"]["name"] == "close_application" for item in selected)
