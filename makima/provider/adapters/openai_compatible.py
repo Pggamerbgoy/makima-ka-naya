@@ -230,6 +230,10 @@ class OpenAICompatibleProvider(BaseProvider):
                 call_kwargs["stream_options"] = {"include_usage": True}
 
             stream_resp = await client.chat.completions.create(**call_kwargs)
+            # Function call IDs, names, and JSON arguments arrive across multiple
+            # delta chunks. Accumulate them instead of silently dropping tool calls.
+            pending_tool_calls: Dict[int, Dict[str, str]] = {}
+            last_finish_reason: Optional[str] = None
 
             async for chunk in stream_resp:
                 if hasattr(chunk, "usage") and chunk.usage:
@@ -243,13 +247,61 @@ class OpenAICompatibleProvider(BaseProvider):
 
                 if not chunk.choices:
                     continue
-                c = chunk.choices[0]
-                delta_text = c.delta.content or ""
-                finish_reason = c.finish_reason
+                choice = chunk.choices[0]
+                delta = getattr(choice, "delta", None)
+                delta_text = getattr(delta, "content", None) or ""
+                finish_reason = getattr(choice, "finish_reason", None)
+                if finish_reason:
+                    last_finish_reason = str(finish_reason)
+
+                for tool_delta in (getattr(delta, "tool_calls", None) or []):
+                    raw_index = getattr(tool_delta, "index", None)
+                    try:
+                        tool_index = int(raw_index)
+                    except (TypeError, ValueError):
+                        tool_index = len(pending_tool_calls)
+                    entry = pending_tool_calls.setdefault(
+                        tool_index,
+                        {"id": "", "name": "", "arguments": ""},
+                    )
+                    call_id = getattr(tool_delta, "id", None)
+                    if call_id:
+                        entry["id"] = str(call_id)
+                    function_delta = getattr(tool_delta, "function", None)
+                    fn_name = getattr(function_delta, "name", None)
+                    if fn_name:
+                        entry["name"] += str(fn_name)
+                    arguments_fragment = getattr(function_delta, "arguments", None)
+                    if arguments_fragment:
+                        entry["arguments"] += str(arguments_fragment)
 
                 yield StreamChunk(
                     delta=delta_text,
                     finish_reason=finish_reason,
+                )
+
+            if pending_tool_calls:
+                completed_calls: List[ToolCall] = []
+                for tool_index in sorted(pending_tool_calls):
+                    parts = pending_tool_calls[tool_index]
+                    raw_arguments = parts["arguments"] or "{}"
+                    try:
+                        parsed_arguments = json.loads(raw_arguments)
+                        if not isinstance(parsed_arguments, dict):
+                            parsed_arguments = {"raw_arguments": raw_arguments}
+                    except json.JSONDecodeError:
+                        parsed_arguments = {"raw_arguments": raw_arguments}
+                    completed_calls.append(
+                        ToolCall(
+                            id=parts["id"] or f"stream_call_{tool_index}",
+                            name=parts["name"],
+                            arguments=parsed_arguments,
+                        )
+                    )
+                yield StreamChunk(
+                    delta="",
+                    tool_calls=completed_calls,
+                    finish_reason="tool_calls",
                 )
 
             await self._on_success()
