@@ -1121,6 +1121,16 @@ html, body, #root { overflow-x: hidden; }
   background: color-mix(in srgb, var(--accent) 15%, var(--panel));
 }
 
+.step-timeline-icon.awaiting_approval {
+  border-color: rgba(245, 158, 11, 0.6);
+  background: color-mix(in srgb, rgba(245, 158, 11, 0.18) 30%, var(--panel));
+  color: #f59e0b;
+}
+
+.message-content-render p:last-child {
+  display: inline;
+}
+
 .step-spinner {
   width: 11px;
   height: 11px;

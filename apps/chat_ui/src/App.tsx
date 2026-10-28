@@ -249,6 +249,8 @@ function App() {
   const eventsFlushTimerRef = useRef<number | null>(null);
   const settingsOpenRef = useRef(settingsOpen);
   const scrollRafRef = useRef<number | null>(null);
+  const chunkBufferRef = useRef<Record<string, string>>({});
+  const chunkRafRef = useRef<number | null>(null);
   const [sessionName, setSessionName] = useState('New session');
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null);
   const [copiedMessage, setCopiedMessage] = useState<string | null>(null);
@@ -272,6 +274,9 @@ function App() {
     return () => {
       if (scrollRafRef.current !== null) {
         window.cancelAnimationFrame(scrollRafRef.current);
+      }
+      if (chunkRafRef.current !== null) {
+        window.cancelAnimationFrame(chunkRafRef.current);
       }
       if (eventsFlushTimerRef.current !== null) {
         window.clearTimeout(eventsFlushTimerRef.current);
@@ -377,6 +382,11 @@ function App() {
       });
     }
     if (event.type === 'message') {
+      if (chunkRafRef.current !== null) {
+        window.cancelAnimationFrame(chunkRafRef.current);
+        chunkRafRef.current = null;
+      }
+      delete chunkBufferRef.current[taskId];
       playChime();
       const content = String(event.content ?? '');
       const suggestions = Array.isArray(event.suggestions) ? event.suggestions.map(String).filter(Boolean) : [];
@@ -419,6 +429,89 @@ function App() {
         utterance.rate = currentSettings.voice_speed;
         window.speechSynthesis.speak(utterance);
       }
+    } else if (event.type === 'chunk') {
+      const delta = String(event.delta ?? '');
+      if (delta) {
+        chunkBufferRef.current[taskId] = (chunkBufferRef.current[taskId] || '') + delta;
+        if (chunkRafRef.current === null) {
+          chunkRafRef.current = window.requestAnimationFrame(() => {
+            chunkRafRef.current = null;
+            const buffered = { ...chunkBufferRef.current };
+            chunkBufferRef.current = {};
+            setMessages((current) => {
+              let updated = false;
+              const next = current.map((item) => {
+                const bDelta = buffered[item.id] || (item.pending && Object.keys(buffered).length === 1 ? Object.values(buffered)[0] : '');
+                if (item.role === 'assistant' && (buffered[item.id] !== undefined || (item.pending && bDelta))) {
+                  updated = true;
+                  return {
+                    ...item,
+                    content: (item.content || '') + bDelta,
+                    pending: true,
+                    currentStage: undefined,
+                  };
+                }
+                return item;
+              });
+              if (!updated) {
+                for (const [tid, d] of Object.entries(buffered)) {
+                  if (!next.some((m) => m.id === tid && m.role === 'assistant')) {
+                    next.push({
+                      id: tid || `task_${Date.now()}`,
+                      role: 'assistant',
+                      content: d,
+                      pending: true,
+                      createdAt: Date.now(),
+                    });
+                  }
+                }
+              }
+              return next;
+            });
+          });
+        }
+      }
+    } else if (event.type === 'permission_request') {
+      const permission_id = String(event.permission_id || event.id || '');
+      const toolName = String(event.tool || event.name || '');
+      const args = (event.arguments as Record<string, unknown>) || {};
+      setMessages((current) => {
+        const nextStep: ExecutionStep = {
+          id: permission_id,
+          name: toolName,
+          type: 'tool',
+          arguments: args,
+          status: 'awaiting_approval',
+          permission_id: permission_id,
+          stage: 'Waiting for permission...',
+          timestamp: Date.now(),
+        };
+        const hasAssistant = current.some((item) =>
+          item.role === 'assistant' && (taskId ? item.id === taskId : item.pending)
+        );
+        if (hasAssistant) {
+          return current.map((item) => {
+            if (item.role === 'assistant' && (taskId ? item.id === taskId : item.pending)) {
+              const prevSteps = item.steps || [];
+              return {
+                ...item,
+                steps: [...prevSteps, nextStep],
+                currentStage: `Waiting for permission: ${toolName}…`,
+              };
+            }
+            return item;
+          });
+        }
+        return [...current, {
+          id: taskId || `task_${Date.now()}`,
+          role: 'assistant',
+          content: '',
+          pending: true,
+          steps: [nextStep],
+          currentStage: `Waiting for permission: ${toolName}…`,
+          createdAt: Date.now(),
+        }];
+      });
     } else if (event.type === 'tool_call') {
       const callId = String(event.id || `tool_${Date.now()}`);
       const toolName = String(event.name || '');
@@ -547,6 +640,25 @@ function App() {
     notify('Response generation stopped', 'info');
   }, [notify, socket]);
 
+  const handlePermissionResponse = useCallback((permissionId: string, allowed: boolean) => {
+    socket.send(JSON.stringify({ type: 'permission_response', permission_id: permissionId, allowed }));
+    setMessages((current) => current.map((item) => {
+      if (!item.steps) return item;
+      const updatedSteps: ExecutionStep[] = item.steps.map((step) => {
+        if (step.permission_id === permissionId || step.id === permissionId) {
+          return {
+            ...step,
+            status: allowed ? 'running' : 'failed',
+            stage: allowed ? 'Permission granted. Executing…' : 'Permission denied by user.',
+            error: allowed ? undefined : 'Execution denied by user',
+          };
+        }
+        return step;
+      });
+      return { ...item, steps: updatedSteps };
+    }));
+  }, [socket]);
+
   const refresh = useCallback(async () => {
     const results = await Promise.allSettled([api.status(), api.connectors(), api.tools(), api.telemetry()]);
     const [statusResult, connectorResult, toolsResult, telemetryResult] = results;
@@ -576,6 +688,43 @@ function App() {
   useEffect(() => {
     refresh().catch((error) => notify(userFacingError(error), 'error'));
   }, [notify, refresh]);
+
+  const syncSessionMessages = useCallback(async (activeId: string) => {
+    if (!activeId) return;
+    try {
+      const detail = await api.getSession(activeId);
+      if (detail.session?.messages?.length) {
+        setSessionName(detail.session.title);
+        setMessages(detail.session.messages.filter((m) => m.role !== 'system').map((message) => {
+          const metadataArtifacts = Array.isArray(message.metadata?.artifacts)
+            ? (message.metadata.artifacts as unknown[]).map((item) => normalizeArtifact(item))
+            : [];
+          const detected = message.role === 'assistant' ? detectArtifacts(message.content) : [];
+          const artifacts = metadataArtifacts.concat(detected);
+          return {
+            id: message.id,
+            role: message.role === 'assistant' ? 'assistant' : 'user',
+            content: message.content,
+            artifacts: artifacts.length ? artifacts : undefined,
+            suggestions: Array.isArray(message.metadata?.suggestions) ? (message.metadata.suggestions as string[]) : undefined,
+            steps: Array.isArray(message.metadata?.steps) ? (message.metadata.steps as ExecutionStep[]) : undefined,
+            createdAt: message.created_at,
+          };
+        }));
+      }
+    } catch {
+      /* keep local cache */
+    }
+  }, [api]);
+
+  useEffect(() => {
+    if (connection === 'connected' && currentSessionId) {
+      const hasPending = messagesRef.current.some((m) => m.role === 'assistant' && m.pending);
+      if (hasPending) {
+        void syncSessionMessages(currentSessionId);
+      }
+    }
+  }, [connection, currentSessionId, syncSessionMessages]);
 
   const refreshSessions = useCallback(async (query = sessionSearch) => {
     try {
@@ -1022,6 +1171,7 @@ Please apply the requested changes, explain what was modified, and provide the u
               onFullscreen={setFullscreen}
               onSelectSuggestion={handleSelectSuggestion}
               onStop={handleStop}
+              onPermissionResponse={handlePermissionResponse}
             />
           ))}
         </div>

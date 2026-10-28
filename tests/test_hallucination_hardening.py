@@ -86,26 +86,19 @@ def test_history_telemetry_isolation():
 
 
 def test_tool_tag_inference():
-    """Verify that _infer_tool_tags correctly isolates domains and falls back to None."""
-    print("[TEST 5] Testing _infer_tool_tags domain scoping...")
+    """Verify that _infer_tool_tags no longer hardcodes brittle domain pruning, returning None for full suite."""
+    print("[TEST 5] Testing _infer_tool_tags unconstrained full tool access...")
     from makima.api.ws import _infer_tool_tags
 
     media_tags = _infer_tool_tags("bhai youtube pe arijit singh ka gaana play kar de")
-    assert media_tags is not None
-    assert "media" in media_tags
-    assert "music" in media_tags
-    assert "playback" in media_tags
-    assert "memory" in media_tags
+    assert media_tags is None, "Expected unconstrained tool access (None) rather than brittle keyword pruning"
 
     doc_tags = _infer_tool_tags("read this excel file and summarize sales column")
-    assert doc_tags is not None
-    assert "documents" in doc_tags
-    assert "excel" in doc_tags
-    assert "filesystem" in doc_tags
+    assert doc_tags is None, "Expected unconstrained tool access (None) rather than brittle keyword pruning"
 
     general_tags = _infer_tool_tags("hello how are you doing today")
     assert general_tags is None, "General conversational text should fallback to None (all tools)"
-    print("  -> PASSED: Tool tag inference correctly isolates domains and falls back gracefully!")
+    print("  -> PASSED: Tool tag inference correctly defaults to unconstrained full registry (None)!")
 
 
 def test_context_compressor_normal_tool_size():

@@ -341,16 +341,171 @@ class EpisodicMemory:
 
         return turns
 
+    @staticmethod
+    def _parse_tool_call(c: Any) -> Optional[Any]:
+        """Safely parses raw dictionaries or ToolCall objects into canonical ToolCall models."""
+        if ToolCall is None:
+            return None
+        if isinstance(c, ToolCall):
+            return c
+        if not isinstance(c, dict):
+            return None
+        if "function" in c and isinstance(c["function"], dict):
+            fn = c["function"]
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {"raw": args}
+            return ToolCall(
+                id=str(c.get("id", "")),
+                name=str(fn.get("name", "")),
+                arguments=args if isinstance(args, dict) else {"value": args},
+            )
+        try:
+            return ToolCall(**c)
+        except Exception:
+            return ToolCall(
+                id=str(c.get("id", "")),
+                name=str(c.get("name", "")),
+                arguments=c.get("arguments", {}) if isinstance(c.get("arguments"), dict) else {},
+            )
+
+    async def get_messages_by_token_budget(
+        self,
+        session_id: str,
+        max_tokens: int,
+        token_counter: Optional[Any] = None,
+        max_messages: int = 5000,
+    ) -> List[Any]:
+        """
+        Retrieves recent turns converted to canonical Message objects, bounded by a total
+        token budget (rather than an arbitrary fixed message count).
+
+        Guarantees:
+          1. Walks backward from most recent turn to oldest turn.
+          2. Preserves Atomic Tool Pair Invariant: Groups assistant tool calls and their
+             corresponding tool responses into atomic clusters so neither is ever orphaned.
+          3. Sane Bounds: Caps the maximum rows fetched from SQLite at `max_messages` (default 5,000).
+          4. Returns messages in ascending chronological order ('asc').
+        """
+        turns = await self.get_recent_turns(session_id=session_id, limit=max_messages, order="asc")
+        if not turns:
+            return []
+
+        if Message is None:
+            return turns
+
+        messages: List[Any] = []
+        for t in turns:
+            parsed_calls = None
+            if t["tool_calls"] and ToolCall is not None:
+                if isinstance(t["tool_calls"], list):
+                    parsed_calls = []
+                    for c in t["tool_calls"]:
+                        call_obj = self._parse_tool_call(c)
+                        if call_obj is not None:
+                            parsed_calls.append(call_obj)
+
+            meta_dict = t["metadata"] if isinstance(t.get("metadata"), dict) else {}
+            messages.append(
+                Message(
+                    role=t["role"],
+                    content=t["content"],
+                    tool_calls=parsed_calls,
+                    tool_call_id=meta_dict.get("tool_call_id"),
+                    name=meta_dict.get("name"),
+                )
+            )
+
+        if not messages:
+            return []
+
+        def _count_msg(msg: Any) -> int:
+            if token_counter is not None and hasattr(token_counter, "count_message"):
+                try:
+                    return token_counter.count_message(msg)
+                except Exception:
+                    pass
+            try:
+                from makima.core.context import TokenCounter
+                return TokenCounter().count_message(msg)
+            except Exception:
+                pass
+            cnt = 4
+            if getattr(msg, "role", None):
+                cnt += len(str(msg.role)) // 4 + 1
+            if getattr(msg, "content", None):
+                cnt += len(str(msg.content)) // 4 + 1
+            if getattr(msg, "tool_calls", None):
+                for tc in msg.tool_calls:
+                    cnt += 8
+                    cnt += len(str(getattr(tc, "name", ""))) // 4 + 1
+                    args = getattr(tc, "arguments", {})
+                    if args:
+                        cnt += len(str(args)) // 4 + 1
+            return max(1, cnt)
+
+        # Group messages into atomic execution blocks to preserve tool call/result pairing
+        blocks: List[List[Any]] = []
+        curr_block: List[Any] = []
+
+        for m in messages:
+            if m.role == "tool":
+                curr_block.append(m)
+            elif m.role == "assistant" and m.tool_calls:
+                if curr_block:
+                    blocks.append(curr_block)
+                curr_block = [m]
+            else:
+                if curr_block:
+                    blocks.append(curr_block)
+                    curr_block = []
+                blocks.append([m])
+
+        if curr_block:
+            blocks.append(curr_block)
+
+        # Accumulate blocks backwards from newest to oldest
+        accumulated_blocks: List[List[Any]] = []
+        total_tokens = 0
+
+        for b in reversed(blocks):
+            block_tokens = sum(_count_msg(m) for m in b)
+            if accumulated_blocks and (total_tokens + block_tokens > max_tokens):
+                break
+            accumulated_blocks.append(b)
+            total_tokens += block_tokens
+
+        accumulated_blocks.reverse()
+        result_messages: List[Any] = [m for b in accumulated_blocks for m in b]
+
+        return result_messages
+
     async def get_recent_messages(
         self,
         session_id: str,
-        limit: int = 100,
+        limit: Optional[int] = None,
+        max_tokens: Optional[int] = None,
+        token_counter: Optional[Any] = None,
     ) -> List[Any]:
         """
         Retrieves recent turns converted directly into canonical Message objects.
-        Requires makima.provider.adapters.base.Message to be available.
+        If `max_tokens` is provided, dynamically loads history up to the token budget
+        with atomic tool pair preservation.
+        Otherwise falls back to count-based `limit` (defaulting to 100).
         """
-        turns = await self.get_recent_turns(session_id=session_id, limit=limit, order="asc")
+        if max_tokens is not None and max_tokens > 0:
+            return await self.get_messages_by_token_budget(
+                session_id=session_id,
+                max_tokens=max_tokens,
+                token_counter=token_counter,
+                max_messages=limit or 5000,
+            )
+
+        eff_limit = limit if limit is not None else 100
+        turns = await self.get_recent_turns(session_id=session_id, limit=eff_limit, order="asc")
         if Message is None:
             return turns
 
@@ -361,10 +516,9 @@ class EpisodicMemory:
                 if isinstance(t["tool_calls"], list):
                     parsed_calls = []
                     for c in t["tool_calls"]:
-                        if isinstance(c, dict):
-                            parsed_calls.append(ToolCall(**c))
-                        elif isinstance(c, ToolCall):
-                            parsed_calls.append(c)
+                        call_obj = self._parse_tool_call(c)
+                        if call_obj is not None:
+                            parsed_calls.append(call_obj)
 
             meta_dict = t["metadata"] if isinstance(t.get("metadata"), dict) else {}
             messages.append(

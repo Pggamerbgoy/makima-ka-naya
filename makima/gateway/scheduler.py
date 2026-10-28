@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from apscheduler.job import Job
@@ -29,9 +30,25 @@ class GatewayScheduler:
       3. Dynamic job cancellation and introspection.
     """
 
-    def __init__(self, timezone_str: str = "UTC"):
+    def __init__(
+        self,
+        timezone_str: str = "UTC",
+        db_path: Optional[Union[Path, str]] = None,
+    ):
         self.timezone_str = timezone_str
-        self._scheduler = AsyncIOScheduler(timezone=timezone_str)
+        jobstores = None
+        if db_path is not None:
+            try:
+                from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+                p = Path(db_path).expanduser().resolve()
+                p.parent.mkdir(parents=True, exist_ok=True)
+                jobstores = {"default": SQLAlchemyJobStore(url=f"sqlite:///{p}")}
+            except Exception as exc:
+                logger.warning(f"Could not initialize persistent SQLAlchemy jobstore for scheduler: {exc}")
+        if jobstores is not None:
+            self._scheduler = AsyncIOScheduler(timezone=timezone_str, jobstores=jobstores)
+        else:
+            self._scheduler = AsyncIOScheduler(timezone=timezone_str)
         self._is_running = False
 
     @property

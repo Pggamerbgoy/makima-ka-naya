@@ -6,12 +6,13 @@ Zero-Hardcoding Guarantee: Dynamically reads GEMINI_API_KEY and backend config.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
 import uuid
-from typing import Any, AsyncIterator, Dict, List, Optional, Set
+from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple
 
 from google import genai
 from google.genai import types
@@ -34,6 +35,164 @@ from makima.provider.circuit_breaker import CircuitBreaker
 logger = logging.getLogger(__name__)
 
 
+class RollingTPMTracker:
+    """Sliding-window token bucket preventing live WebSocket sessions from exceeding TPM limits."""
+
+    def __init__(self, max_tpm: int = 55000, window_seconds: float = 60.0):
+        self.max_tpm = max_tpm
+        self.window_seconds = window_seconds
+        self._history: List[Tuple[float, int]] = []
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, estimated_tokens: int) -> None:
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self._history = [(t, tok) for t, tok in self._history if now - t < self.window_seconds]
+                current_usage = sum(tok for _, tok in self._history)
+                if current_usage + estimated_tokens <= self.max_tpm:
+                    self._history.append((now, estimated_tokens))
+                    return
+                oldest_time = self._history[0][0]
+                sleep_time = max(0.5, self.window_seconds - (now - oldest_time) + 0.1)
+                logger.info(
+                    "Live TPM clamp active: %d/%d tokens active in window. Pacing request for %.1fs.",
+                    current_usage,
+                    self.max_tpm,
+                    sleep_time,
+                )
+                await asyncio.sleep(sleep_time)
+
+
+_GLOBAL_LIVE_TPM_TRACKER = RollingTPMTracker(max_tpm=55000, window_seconds=60.0)
+
+
+_ALLOWED_GEMINI_SCHEMA_KEYS = {
+    "type",
+    "format",
+    "description",
+    "nullable",
+    "enum",
+    "max_items",
+    "maxItems",
+    "min_items",
+    "minItems",
+    "properties",
+    "required",
+    "items",
+    "min_length",
+    "minLength",
+    "max_length",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "pattern",
+    "default",
+    "example",
+    "any_of",
+    "anyOf",
+    "property_ordering",
+    "propertyOrdering",
+    "defs",
+    "ref",
+    "title",
+}
+
+
+def _sanitize_gemini_schema(raw: Any) -> Any:
+    """
+    Recursively purges JSON-schema meta keywords ($schema, $id, $comment, etc.)
+    and unsupported attributes that violate Google GenAI's strict types.Schema
+    (extra='forbid') constraints.
+    """
+    if not isinstance(raw, dict):
+        return raw
+
+    cleaned: Dict[str, Any] = {}
+    for k, v in raw.items():
+        norm_k = k
+        if k == "$ref":
+            norm_k = "ref"
+        elif k in ("$defs", "definitions"):
+            norm_k = "defs"
+        elif k in ("oneOf", "allOf"):
+            norm_k = "anyOf"
+        elif k.startswith("$"):
+            # Purge all JSON-schema meta keywords ($schema, $id, $comment, etc.)
+            continue
+
+        if norm_k == "properties" and isinstance(v, dict):
+            cleaned["properties"] = {
+                str(p_name): _sanitize_gemini_schema(p_val) if isinstance(p_val, dict) else p_val
+                for p_name, p_val in v.items()
+            }
+            continue
+
+        if norm_k == "defs" and isinstance(v, dict):
+            cleaned["defs"] = {
+                str(d_name): _sanitize_gemini_schema(d_val) if isinstance(d_val, dict) else d_val
+                for d_name, d_val in v.items()
+            }
+            continue
+
+        if norm_k == "items":
+            if isinstance(v, dict):
+                cleaned["items"] = _sanitize_gemini_schema(v)
+            elif isinstance(v, list):
+                cleaned["items"] = [
+                    _sanitize_gemini_schema(it) if isinstance(it, dict) else it for it in v
+                ]
+            continue
+
+        if norm_k in ("anyOf", "any_of") and isinstance(v, list):
+            cleaned["anyOf"] = [
+                _sanitize_gemini_schema(it) if isinstance(it, dict) else it for it in v
+            ]
+            continue
+
+        if norm_k not in _ALLOWED_GEMINI_SCHEMA_KEYS:
+            continue
+
+        if norm_k == "type" and isinstance(v, list):
+            # Unpack JSON schema draft union types, e.g. ["string", "null"]
+            types_list = [t for t in v if t != "null"]
+            if "null" in v:
+                cleaned["nullable"] = True
+            cleaned["type"] = types_list[0] if types_list else "NULL"
+            continue
+
+        if isinstance(v, dict):
+            cleaned[norm_k] = _sanitize_gemini_schema(v)
+        else:
+            cleaned[norm_k] = v
+
+    if "properties" in cleaned and "type" not in cleaned:
+        cleaned["type"] = "object"
+
+    return cleaned
+
+
+def _serialize_declaration_schema(val: Any) -> Any:
+    """Safely converts types.Schema or dictionary to a JSON-serializable dictionary for stable hashing."""
+    if val is None:
+        return {}
+    if hasattr(val, "to_json_dict") and callable(val.to_json_dict):
+        try:
+            return val.to_json_dict()
+        except Exception:
+            pass
+    if hasattr(val, "model_dump") and callable(val.model_dump):
+        try:
+            return val.model_dump(mode="json", exclude_none=True)
+        except Exception:
+            pass
+    if isinstance(val, dict):
+        return {str(k): _serialize_declaration_schema(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_serialize_declaration_schema(x) for x in val]
+    return str(val)
+
+
 class GeminiProvider(BaseProvider):
     """
     Adapter for Google Gemini models (e.g. gemini-2.5-flash) using official google-genai SDK.
@@ -53,16 +212,18 @@ class GeminiProvider(BaseProvider):
         self._active_cache_key: Optional[str] = None
         self._active_cache_name: Optional[str] = None
         self._active_cache_expiry: float = 0.0
+        self._last_cache_fallback_reason: Optional[str] = None
         self.cache_manager = get_cache_manager()
         self.cache_strategy = CacheStrategy.EXPLICIT_GENAI
 
     def _get_client(self) -> genai.Client:
         """Lazy initialization of genai.Client with active API key."""
-        api_key = self.config.api_key
+        import os
+        api_key = self.config.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise ValueError(
                 f"Missing API key for Gemini backend '{self.name}'. "
-                f"Ensure environment variable '{self.config.api_key_env or 'GEMINI_API_KEY'}' is set."
+                f"Ensure environment variable '{self.config.api_key_env or 'GEMINI_API_KEY'}' or 'GOOGLE_API_KEY' is set."
             )
         if self._client is None:
             self._client = genai.Client(api_key=api_key)
@@ -74,11 +235,11 @@ class GeminiProvider(BaseProvider):
         if not canonical_tools:
             return None
 
-        names_key = ",".join(
-            str(t.get("function", t).get("name", ""))
-            for t in canonical_tools
-        )
-        if names_key and self._cached_tools_key == names_key and self._cached_tools_payload is not None:
+        # Build stable hash from canonical schemas (including parameters, types, descriptions)
+        schema_blob = json.dumps(canonical_tools, sort_keys=True, separators=(",", ":"))
+        schema_hash = hashlib.sha256(schema_blob.encode("utf-8")).hexdigest()[:16]
+
+        if self._cached_tools_key == schema_hash and self._cached_tools_payload is not None:
             return self._cached_tools_payload
 
         declarations = []
@@ -88,20 +249,38 @@ class GeminiProvider(BaseProvider):
             description = fn.get("description", "")
             parameters = fn.get("parameters", {})
             if name:
-                declarations.append(
-                    types.FunctionDeclaration(
-                        name=name,
-                        description=description,
-                        parameters=parameters,
+                clean_params = _sanitize_gemini_schema(parameters)
+                try:
+                    declarations.append(
+                        types.FunctionDeclaration(
+                            name=name,
+                            description=description,
+                            parameters=clean_params,
+                        )
                     )
-                )
+                except Exception as decl_err:
+                    logger.warning(
+                        "Failed to convert schema for tool '%s' to Gemini FunctionDeclaration: %s. "
+                        "Falling back to basic object parameters.",
+                        name,
+                        decl_err,
+                    )
+                    try:
+                        declarations.append(
+                            types.FunctionDeclaration(
+                                name=name,
+                                description=description,
+                                parameters={"type": "object", "properties": {}},
+                            )
+                        )
+                    except Exception:
+                        pass
 
         if not declarations:
             return None
         result = [types.Tool(function_declarations=declarations)]
-        if names_key:
-            self._cached_tools_key = names_key
-            self._cached_tools_payload = result
+        self._cached_tools_key = schema_hash
+        self._cached_tools_payload = result
         return result
 
     def _convert_messages(self, messages: List[Message]) -> List[types.Content]:
@@ -194,8 +373,20 @@ class GeminiProvider(BaseProvider):
         if not gemini_tools and not system_prompt:
             return None
 
-        tools_repr = str([t.function_declarations for t in gemini_tools]) if gemini_tools else ""
-        cache_seed = f"{self.config.model}:{system_prompt or ''}:{tools_repr}"
+        # Build stable JSON canonical representation for function declarations
+        tools_summary = []
+        if gemini_tools:
+            for t in gemini_tools:
+                for fd in (getattr(t, "function_declarations", None) or []):
+                    params = getattr(fd, "parameters", None)
+                    tools_summary.append({
+                        "name": getattr(fd, "name", ""),
+                        "description": getattr(fd, "description", "") or "",
+                        "parameters": _serialize_declaration_schema(params),
+                    })
+
+        tools_blob = json.dumps(tools_summary, sort_keys=True, separators=(",", ":"))
+        cache_seed = f"{self.config.model}:{system_prompt or ''}:{tools_blob}"
         cache_key = hashlib.sha256(cache_seed.encode("utf-8")).hexdigest()
 
         now = time.monotonic()
@@ -223,9 +414,256 @@ class GeminiProvider(BaseProvider):
                 logger.info("Created Gemini KV Context Cache '%s' for model %s (saving ~11k+ tokens/turn)", cache_name, self.config.model)
                 return cache_name
         except Exception as exc:
-            logger.debug("Gemini KV Context Caching skipped/fallback: %s", exc)
+            self._last_cache_fallback_reason = str(exc)
+            logger.info("Gemini KV Context Caching fallback to standard prompt for model %s: %s", self.config.model, exc)
 
         return None
+
+    def _is_live_model(self) -> bool:
+        """Determines if target model requires bidiGenerateContent WebSocket connection."""
+        model_name = str(self.config.model or "").lower()
+        return "live" in model_name or "bidi" in model_name
+
+    def _clean_live_schema(self, d: Any) -> Any:
+        """Sanitizes schema specifically for Gemini Live WebSocket API constraints."""
+        if not isinstance(d, dict):
+            return d
+        out = {}
+        for k, v in d.items():
+            if k in ("additionalProperties", "additional_properties", "$schema", "$id", "$comment", "$defs", "definitions"):
+                continue
+            if k == "title" and isinstance(v, str):
+                continue
+            if k == "properties" and isinstance(v, dict):
+                out["properties"] = {pk: self._clean_live_schema(pv) for pk, pv in v.items()}
+                continue
+            if isinstance(v, dict):
+                out[k] = self._clean_live_schema(v)
+            elif isinstance(v, list):
+                out[k] = [self._clean_live_schema(x) if isinstance(x, dict) else x for x in v]
+            else:
+                out[k] = v
+        if "properties" in out and "type" not in out:
+            out["type"] = "object"
+        return out
+
+    async def _generate_live(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs,
+    ) -> ProviderResponse:
+        """Executes full-duplex WebSocket Live turn for models that require bidiGenerateContent."""
+        start_time = time.monotonic()
+        client = self._get_client()
+
+        function_declarations = []
+        if tools:
+            canonical_tools = canonicalize_tool_schemas(tools) or []
+            for t in canonical_tools:
+                fn = t.get("function", t)
+                name = fn.get("name")
+                description = fn.get("description", "")
+                parameters = fn.get("parameters", {})
+                if name:
+                    clean_params = self._clean_live_schema(_sanitize_gemini_schema(parameters))
+                    function_declarations.append({
+                        "name": name,
+                        "description": description,
+                        "parameters": clean_params,
+                    })
+
+        thinking_cfg = None
+        model_lower = str(self.config.model or "").lower()
+        if "extended-thinking" in model_lower:
+            thinking_cfg = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+
+        tools_config = [types.Tool(function_declarations=function_declarations)] if function_declarations else None
+        live_config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            tools=tools_config,
+            system_instruction=system_prompt,
+            thinking_config=thinking_cfg,
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede"))
+            ),
+        )
+
+        # Apply sliding window TPM protection before opening WebSocket
+        est_tokens = len(system_prompt or "") // 3 + len(function_declarations) * 90 + 200
+        await _GLOBAL_LIVE_TPM_TRACKER.acquire(est_tokens)
+
+        cm = client.aio.live.connect(model=self.config.model, config=live_config)
+        session = await cm.__aenter__()
+        try:
+            recent_context = []
+            for m in messages:
+                if m.role == "user" and m.content:
+                    recent_context.append(f"User: {m.content}")
+                elif m.role == "assistant":
+                    if m.content:
+                        recent_context.append(f"Assistant: {m.content}")
+                    elif m.tool_calls:
+                        c_str = ", ".join(f"{c.name}({json.dumps(c.arguments or {})})" for c in m.tool_calls)
+                        recent_context.append(f"Assistant invoked tool: {c_str}")
+                elif m.role == "tool":
+                    tool_desc = f"Tool Result ({m.name or getattr(m, 'tool_call_id', 'tool')})"
+                    recent_context.append(f"{tool_desc}: {m.content[:1500]}")
+
+            last_msg = messages[-1] if messages else None
+            if last_msg and last_msg.role == "tool":
+                full_prompt = (
+                    "Here is the ongoing conversation and latest tool execution results:\n"
+                    + "\n".join(recent_context[-8:])
+                    + "\n\nPlease provide your response or next tool call based on these results."
+                )
+            elif recent_context and len(recent_context) > 1:
+                history_str = "\n".join(recent_context[:-1][-6:])
+                curr_req = (last_msg.content if last_msg else "") or ""
+                full_prompt = f"Previous conversation:\n{history_str}\n\nCurrent user request: {curr_req}"
+            else:
+                full_prompt = (last_msg.content if last_msg else "") or "Hello"
+
+            await session.send(input=full_prompt, end_of_turn=True)
+
+            content_pieces: List[str] = []
+            tool_calls: List[ToolCall] = []
+
+            async for resp in session.receive():
+                sc = getattr(resp, "server_content", None)
+                if sc:
+                    ot = getattr(sc, "output_transcription", None)
+                    if ot and getattr(ot, "text", None):
+                        content_pieces.append(ot.text)
+                tc = getattr(resp, "tool_call", None)
+                if tc:
+                    for fc in getattr(tc, "function_calls", []):
+                        call_id = getattr(fc, "id", None) or f"call_{uuid.uuid4().hex[:8]}"
+                        fn_name = fc.name.split(":")[-1] if ":" in fc.name else fc.name
+                        args = dict(fc.args) if hasattr(fc, "args") else {}
+                        tool_calls.append(ToolCall(id=call_id, name=fn_name, arguments=args))
+                    break
+                if sc and getattr(sc, "turn_complete", False):
+                    break
+
+            elapsed_ms = (time.monotonic() - start_time) * 1000.0
+            return ProviderResponse(
+                content="".join(content_pieces).strip(),
+                tool_calls=tool_calls,
+                finish_reason="tool_calls" if tool_calls else "stop",
+                model=self.config.model,
+                latency_ms=elapsed_ms,
+            )
+        finally:
+            await cm.__aexit__(None, None, None)
+
+    async def _stream_live(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs,
+    ) -> AsyncIterator[StreamChunk]:
+        """Streams text chunks in real-time from bidi WebSocket live session."""
+        client = self._get_client()
+
+        function_declarations = []
+        if tools:
+            canonical_tools = canonicalize_tool_schemas(tools) or []
+            for t in canonical_tools:
+                fn = t.get("function", t)
+                name = fn.get("name")
+                description = fn.get("description", "")
+                parameters = fn.get("parameters", {})
+                if name:
+                    clean_params = self._clean_live_schema(_sanitize_gemini_schema(parameters))
+                    function_declarations.append({
+                        "name": name,
+                        "description": description,
+                        "parameters": clean_params,
+                    })
+
+        thinking_cfg = None
+        model_lower = str(self.config.model or "").lower()
+        if "extended-thinking" in model_lower:
+            thinking_cfg = types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+
+        tools_config = [types.Tool(function_declarations=function_declarations)] if function_declarations else None
+        live_config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            tools=tools_config,
+            system_instruction=system_prompt,
+            thinking_config=thinking_cfg,
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede"))
+            ),
+        )
+
+        # Apply sliding window TPM protection before opening WebSocket
+        est_tokens = len(system_prompt or "") // 3 + len(function_declarations) * 90 + 200
+        await _GLOBAL_LIVE_TPM_TRACKER.acquire(est_tokens)
+
+        cm = client.aio.live.connect(model=self.config.model, config=live_config)
+        session = await cm.__aenter__()
+        try:
+            recent_context = []
+            for m in messages:
+                if m.role == "user" and m.content:
+                    recent_context.append(f"User: {m.content}")
+                elif m.role == "assistant":
+                    if m.content:
+                        recent_context.append(f"Assistant: {m.content}")
+                    elif m.tool_calls:
+                        c_str = ", ".join(f"{c.name}({json.dumps(c.arguments or {})})" for c in m.tool_calls)
+                        recent_context.append(f"Assistant invoked tool: {c_str}")
+                elif m.role == "tool":
+                    tool_desc = f"Tool Result ({m.name or getattr(m, 'tool_call_id', 'tool')})"
+                    recent_context.append(f"{tool_desc}: {m.content[:1500]}")
+
+            last_msg = messages[-1] if messages else None
+            if last_msg and last_msg.role == "tool":
+                full_prompt = (
+                    "Here is the ongoing conversation and latest tool execution results:\n"
+                    + "\n".join(recent_context[-8:])
+                    + "\n\nPlease provide your response or next tool call based on these results."
+                )
+            elif recent_context and len(recent_context) > 1:
+                history_str = "\n".join(recent_context[:-1][-6:])
+                curr_req = (last_msg.content if last_msg else "") or ""
+                full_prompt = f"Previous conversation:\n{history_str}\n\nCurrent user request: {curr_req}"
+            else:
+                full_prompt = (last_msg.content if last_msg else "") or "Hello"
+
+            await session.send(input=full_prompt, end_of_turn=True)
+
+            async for resp in session.receive():
+                sc = getattr(resp, "server_content", None)
+                if sc:
+                    ot = getattr(sc, "output_transcription", None)
+                    if ot and getattr(ot, "text", None):
+                        yield StreamChunk(delta=ot.text, model=self.config.model)
+                tc = getattr(resp, "tool_call", None)
+                if tc:
+                    tool_calls: List[ToolCall] = []
+                    for fc in getattr(tc, "function_calls", []):
+                        call_id = getattr(fc, "id", None) or f"call_{uuid.uuid4().hex[:8]}"
+                        fn_name = fc.name.split(":")[-1] if ":" in fc.name else fc.name
+                        args = dict(fc.args) if hasattr(fc, "args") else {}
+                        tool_calls.append(ToolCall(id=call_id, name=fn_name, arguments=args))
+                    yield StreamChunk(delta="", tool_calls=tool_calls, finish_reason="tool_calls", model=self.config.model)
+                    break
+                if sc and getattr(sc, "turn_complete", False):
+                    yield StreamChunk(delta="", finish_reason="stop", model=self.config.model)
+                    break
+        finally:
+            await cm.__aexit__(None, None, None)
 
     async def generate(
         self,
@@ -238,6 +676,22 @@ class GeminiProvider(BaseProvider):
     ) -> ProviderResponse:
         await self._before_call()
         start_time = time.monotonic()
+
+        if self._is_live_model():
+            try:
+                res = await self._generate_live(
+                    messages=messages,
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
+                await self._on_success()
+                return res
+            except Exception as e:
+                await self._on_failure(e)
+                raise
 
         try:
             client = self._get_client()
@@ -409,6 +863,17 @@ class GeminiProvider(BaseProvider):
         **kwargs,
     ) -> AsyncIterator[StreamChunk]:
         await self._before_call()
+        if self._is_live_model():
+            async for chunk in self._stream_live(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            ):
+                yield chunk
+            return
         try:
             client = self._get_client()
             contents = self._convert_messages(messages)

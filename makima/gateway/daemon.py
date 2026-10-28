@@ -38,7 +38,8 @@ class GatewayDaemon:
     ):
         self.settings = settings or get_settings()
         self.security = security_manager or GatewaySecurityManager()
-        self.scheduler = scheduler or GatewayScheduler()
+        sched_db = (self.settings.state_dir_path / "scheduler.db") if hasattr(self.settings, "state_dir_path") else None
+        self.scheduler = scheduler or GatewayScheduler(db_path=sched_db)
         self.engine = engine
 
         self._adapters: Dict[str, Any] = {}

@@ -9,7 +9,9 @@ Zero-Duplication Guarantee: Single canonical normalization, schema canonicalizat
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from enum import Enum
+import hashlib
 import json
 import logging
 import threading
@@ -38,8 +40,11 @@ def resolve_cache_strategy(
 
     Classification matrix:
       - adapter == 'gemini': Google GenAI Explicit Context Caching (CachedContent API)
-      - base_url containing 'anthropic' or OpenRouter with Claude/DeepSeek/Qwen:
+      - adapter == 'anthropic' or base_url containing 'anthropic.com':
           Anthropic Ephemeral Cache Control breakpoints on static prompt & tools
+      - base_url containing 'openrouter.ai':
+          - Claude/Anthropic/Qwen models: Anthropic-style explicit cache_control breakpoints
+          - DeepSeek models & others: Automatic KV Prefix Caching at Byte 0
       - base_url containing 'openai', 'deepseek', 'groq', 'cerebras', 'dashscope', 'ollama',
           or localhost: Automatic KV Prefix Caching at Byte 0
       - default for openai-compatible: AUTOMATIC_PREFIX (canonical sorting & deterministic layout)
@@ -51,11 +56,15 @@ def resolve_cache_strategy(
     base = (base_url or "").strip().lower()
     m_name = (model or "").strip().lower()
 
-    if "anthropic.com" in base:
+    if adapter_norm == "anthropic" or "anthropic.com" in base:
         return CacheStrategy.EXPLICIT_CACHE_CONTROL
 
     if "openrouter.ai" in base:
-        if any(kw in m_name for kw in ("claude", "anthropic", "deepseek", "qwen", "sonnet", "haiku", "opus")):
+        # DeepSeek on OpenRouter uses automatic prompt prefix caching (matching native DeepSeek)
+        if "deepseek" in m_name:
+            return CacheStrategy.AUTOMATIC_PREFIX
+        # Claude and Qwen support explicit cache_control breakpoints on OpenRouter
+        if any(kw in m_name for kw in ("claude", "anthropic", "sonnet", "haiku", "opus", "qwen")):
             return CacheStrategy.EXPLICIT_CACHE_CONTROL
         return CacheStrategy.AUTOMATIC_PREFIX
 
@@ -145,11 +154,12 @@ def canonicalize_tool_schemas(tools: Optional[List[Dict[str, Any]]]) -> Optional
 def partition_system_prompt(system_prompt: Optional[str]) -> Tuple[str, str]:
     """
     Partitions a system prompt into:
-      - static_prefix: Immutable base instructions, persona rules, and durable memory facts.
-      - dynamic_suffix: Ephemeral per-turn data (e.g. active browser DOM state, live search query results).
+      - static_prefix: Immutable base instructions, persona rules, and durable system directives.
+      - dynamic_suffix: Ephemeral per-turn data (e.g. active browser DOM state, query-dependent memory, skills).
 
-    Uses designated delimiter boundaries ('\n\n---\n\n<active_browser_state>' or '\n\n<active_browser_state>')
-    to keep the immutable prefix strictly at Byte 0 for maximum KV prefix cache reuse.
+    Keeps the immutable prefix strictly at Byte 0 so that:
+      1. Anthropic / OpenRouter explicit `cache_control` breakpoints are placed ONLY on the immutable base.
+      2. OpenAI, Groq, DeepSeek, and Gemini KV prefix caches achieve maximum byte-0 hit rates.
     """
     if not system_prompt:
         return "", ""
@@ -163,12 +173,40 @@ def partition_system_prompt(system_prompt: Optional[str]) -> Tuple[str, str]:
         suffix = "<active_browser_state>" + parts[1]
         return prefix, suffix
 
-    # Check if system prompt contains explicit dynamic divider
+    dynamic_markers = (
+        "<memory>",
+        "<memory\n",
+        "<skills>",
+        "<skills\n",
+        "<active",
+        "<dynamic",
+        "<turn_",
+        "<ephemeral",
+    )
+
+    # Check for dynamic section dividers (may contain multiple '---' sections, e.g. base + memory + skills)
     if "\n\n---\n\n" in system_prompt:
-        # Check if the last part is marked as dynamic
-        prefix, suffix = system_prompt.rsplit("\n\n---\n\n", 1)
-        if any(marker in suffix for marker in ("<dynamic", "<active", "<turn_", "<ephemeral")):
+        sections = system_prompt.split("\n\n---\n\n")
+        split_idx = -1
+        for idx in range(1, len(sections)):
+            sec_strip = sections[idx].lstrip()
+            if any(sec_strip.startswith(m) or m in sections[idx] for m in dynamic_markers):
+                split_idx = idx
+                break
+
+        if split_idx != -1:
+            prefix = "\n\n---\n\n".join(sections[:split_idx]).rstrip()
+            suffix = "\n\n---\n\n".join(sections[split_idx:]).lstrip()
             return prefix, suffix
+
+    # Direct marker search if no explicit '---' divider was used
+    for marker in ("<memory>", "<skills>", "<dynamic_context>", "<ephemeral_context>"):
+        if marker in system_prompt:
+            prefix, suffix = system_prompt.split(marker, 1)
+            prefix = prefix.rstrip()
+            if prefix.endswith("---"):
+                prefix = prefix[:-3].rstrip()
+            return prefix, marker + suffix
 
     return system_prompt, ""
 
@@ -403,11 +441,13 @@ class PromptCacheMetrics:
     def get_summary(self) -> Dict[str, Any]:
         with self._lock:
             hit_rate = (self.cache_hits / self.total_requests) if self.total_requests > 0 else 0.0
-            savings_pct = (
-                (self.total_cached_tokens / (self.total_prompt_tokens + self.total_cached_tokens) * 100.0)
-                if (self.total_prompt_tokens + self.total_cached_tokens) > 0
-                else 0.0
-            )
+            # Token accounting: in OpenAI and Gemini API usage conventions, `prompt_tokens`
+            # represents the total input tokens (which already subsumes cached tokens).
+            # Avoid double-counting cached tokens in the denominator.
+            if self.total_prompt_tokens > 0:
+                savings_pct = min(100.0, (self.total_cached_tokens / self.total_prompt_tokens) * 100.0)
+            else:
+                savings_pct = 0.0
             return {
                 "total_requests": self.total_requests,
                 "cache_hits": self.cache_hits,
@@ -422,7 +462,7 @@ class PromptCacheMetrics:
 class UnifiedPromptCacheManager:
     """
     Central Coordinator for Multi-Provider Prompt & Context Caching.
-    Manages formatting, canonicalization, in-memory serialization caches, and metrics.
+    Manages formatting, canonicalization, in-memory bounded LRU serialization caches, and metrics.
     """
 
     _instance: Optional[UnifiedPromptCacheManager] = None
@@ -436,10 +476,11 @@ class UnifiedPromptCacheManager:
                     cls._instance = cls()
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, max_tool_cache_size: int = 256):
         self.metrics = PromptCacheMetrics()
         self._tool_cache_lock = threading.Lock()
-        self._tool_format_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._max_tool_cache_size = max_tool_cache_size
+        self._tool_format_cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
 
     def get_strategy(
         self,
@@ -469,20 +510,25 @@ class UnifiedPromptCacheManager:
         if not tools:
             return None
 
-        # Build stable cache key from tool names and strategy
-        names_key = ",".join(
-            t.get("function", {}).get("name", "") if isinstance(t.get("function"), dict) else str(t.get("name", ""))
-            for t in tools
-        )
-        cache_key = f"{strategy.value}:{names_key}"
+        # Build stable cache key from canonical tool schemas (including types, parameters, descriptions)
+        canonical = canonicalize_tool_schemas(tools)
+        if not canonical:
+            return None
+
+        schema_blob = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+        schema_hash = hashlib.sha256(schema_blob.encode("utf-8")).hexdigest()[:16]
+        cache_key = f"{strategy.value}:{schema_hash}"
 
         with self._tool_cache_lock:
             if cache_key in self._tool_format_cache:
+                self._tool_format_cache.move_to_end(cache_key)
                 return self._tool_format_cache[cache_key]
 
-        formatted = format_cached_tools(tools, strategy=strategy)
+        formatted = format_cached_tools(canonical, strategy=strategy)
         if formatted is not None:
             with self._tool_cache_lock:
+                if len(self._tool_format_cache) >= self._max_tool_cache_size:
+                    self._tool_format_cache.popitem(last=False)
                 self._tool_format_cache[cache_key] = formatted
 
         return formatted

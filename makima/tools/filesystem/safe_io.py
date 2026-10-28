@@ -159,7 +159,10 @@ def _get_saga_manager() -> SagaRollbackManager:
 
 @tool(
     name="read_file",
-    description="Read the contents of a text file located within the workspace boundary.",
+    description=(
+        "Use when you need to read the content of a file in the workspace. "
+        "Do not use for files outside the workspace — use execute_command with 'type' or 'cat' for those."
+    ),
     tags=["filesystem", "read", "io"],
 )
 def read_file(path: str, encoding: str = "utf-8") -> str:
@@ -374,7 +377,11 @@ def delete_file(path: str) -> str:
 
 @tool(
     name="list_directory",
-    description="List files and subdirectories within a specified workspace path.",
+    description=(
+        "Use when you need to see what files or folders exist in a workspace directory. "
+        "Use recursive=True to see the full tree. "
+        "For directories outside the workspace, use execute_command with 'dir' or 'ls'."
+    ),
     tags=["filesystem", "list", "io"],
 )
 def list_directory(

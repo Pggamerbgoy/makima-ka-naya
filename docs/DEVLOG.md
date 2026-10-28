@@ -2,6 +2,35 @@
 
 > **Purpose**: Formal engineering record of major architectural decisions, evaluated tradeoffs, rejected alternatives, and resolved platform-specific edge cases throughout the development of Makima v2.
 
+## 📅 2026-10-27
+
+### Entry 21: Multi-Provider Prompt Caching Audit, Dynamic Partitioning, Deterministic Tool Schema Hashing & Bounded LRU Cache
+- **Context**: In response to a rigorous code audit of `makima/provider/cache.py`, `makima/provider/adapters/gemini.py`, and `makima/core/engine.py`, verified, remediated, and unit-tested all verified caching flaws across providers.
+- **Audit Findings & Architectural Remediation**:
+  1. **Dynamic Memory & Skills Context Partitioning (`makima/provider/cache.py`, `makima/core/engine.py`)**:
+     - *Flaw*: `<memory>` and `<skills>` markers were appended to `effective_system_prompt` with `\n\n---\n\n` dividers, but `partition_system_prompt()` only looked for `("<dynamic", "<active", "<turn_", "<ephemeral")` and only split on the last `\n\n---\n\n` divider via `rsplit(..., 1)`. When episodic/vector memory was injected, the dynamic context was mistakenly included in `static_prefix`. For Anthropic, putting `cache_control: {"type": "ephemeral"}` at the end of `static_prefix` invalidated the cache on every query with different retrieved memory facts.
+     - *Fix*: Enhanced `partition_system_prompt()` to scan all `\n\n---\n\n` sections and split at the earliest dynamic marker (`<memory>`, `<skills>`, `<active_browser_state>`, `<dynamic>`, `<ephemeral>`), keeping `static_prefix` 100% immutable across turns.
+  2. **Tool Format Cache Key Stale Schema Remediation (`makima/provider/cache.py`, `makima/provider/adapters/gemini.py`)**:
+     - *Flaw*: Cache keys for formatted tools were constructed using only joined tool names (`names_key = ",".join(names)`). If a tool's description, parameters, or types changed, stale formatted schemas were returned from cache.
+     - *Fix*: Both `UnifiedPromptCacheManager.format_tools` and `GeminiProvider._convert_tools` now compute stable SHA-256 hashes of the full canonicalized tool schemas (including descriptions, parameters, and property types), guaranteeing instant cache invalidation upon any schema change.
+  3. **Provider-Specific Caching Strategy Resolution (`makima/provider/cache.py`)**:
+     - *Flaw*: On OpenRouter, DeepSeek was grouped with Claude into `EXPLICIT_CACHE_CONTROL`, even though OpenRouter documentation and backend behavior use automatic prompt prefix caching for DeepSeek.
+     - *Fix*: Disambiguated OpenRouter routing: DeepSeek maps to `AUTOMATIC_PREFIX` (matching native DeepSeek), while Claude and Qwen retain `EXPLICIT_CACHE_CONTROL`. Added explicit fallback for native Anthropic (`adapter == "anthropic"`).
+  4. **Gemini Fallback Observability & Stable Canonical Declaration Serialization (`makima/provider/adapters/gemini.py`)**:
+     - *Flaw*: `_get_or_create_context_cache()` swallowed cache creation failures silently into `logger.debug`, hiding fallback causes (such as token floor requirements). Furthermore, cache seeds relied on `str([t.function_declarations for t in gemini_tools])`, which used SDK `__repr__`.
+     - *Fix*: Function declarations are now converted to canonical Python dictionaries via `_serialize_declaration_schema` (extracting from `types.Schema.to_json_dict()`/`model_dump()`) before hashing. Cache creation failures are logged at `INFO` level and recorded in `self._last_cache_fallback_reason`.
+  5. **Prompt Cache Savings Metric Normalization (`makima/provider/cache.py`)**:
+     - *Flaw*: `PromptCacheMetrics.get_summary()` used `cached_tokens / (prompt_tokens + cached_tokens) * 100`. In OpenAI and Gemini usage conventions, `prompt_tokens` is the total input token count (already subsuming cached tokens), causing double-counting in the denominator.
+     - *Fix*: Corrected formula to `min(100.0, (total_cached_tokens / total_prompt_tokens) * 100.0)` when `total_prompt_tokens > 0`.
+  6. **Bounded LRU Eviction for Tool Format Cache (`makima/provider/cache.py`)**:
+     - *Flaw*: `_tool_format_cache` was an unbounded `dict`, presenting a risk of slow memory growth over millions of distinct tool combinations.
+     - *Fix*: Implemented bounded `OrderedDict` with `max_tool_cache_size = 256` and LRU eviction (`popitem(last=False)`).
+- **Verification & Testing**:
+  - Authored comprehensive test suite `tests/verify_cache_audit.py` testing all 6 remediated areas: ALL 6 TESTS PASSED.
+  - Re-verified `tests/verify_providers.py`: ALL 6 TESTS PASSED.
+  - Re-verified `tests/verify_engine_memory.py`: ALL 4 TESTS PASSED.
+  - Re-verified `tests/verify_engine.py`: ALL 8 TESTS PASSED.
+
 ## 📅 2026-10-23
 
 ### Entry 20: Comprehensive Adversarial Suite Implementation, Guardrail Bypass Remediation & SAGA Cryptographic Integrity
@@ -529,3 +558,51 @@
 - Replaced the old browser-only speech input button with a Voice control that supports `Makima` wake-word detection, native Live audio playback, microphone permission fallback, and stop/error states.
 - Voice settings now include wake-word enablement and Gemini voice selection. Existing Makima tools such as `launch_application` and `play_song` remain available to the Live tool registry.
 - Verification: voice/API contract tests `8 passed`; existing Gemini Live verification passed; frontend TypeScript lint and production build passed.
+
+---
+
+### Entry 21: Prompt Caching Architecture Audit & Zero-Double-Counting Telemetry (2026-10-27)
+- **Context & Bug Audits**:
+  1. Dynamic system prompt partitioner failed to recognize `<memory>` and `<skills>` tags, appending query-dependent context to static prefixes and causing unnecessary prompt cache invalidation in Anthropic and OpenAI prefix caches.
+  2. Tool-format cache keys relied solely on strategy and tool names, causing stale schemas to be returned upon parameter/type changes without invalidation.
+  3. OpenRouter cache routing conflated DeepSeek (automatic caching) and Alibaba Qwen (explicit cache control markers).
+  4. Gemini context caching silently fell back with opaque debug-level logs without exposing reasons (e.g. model eligibility, min token threshold).
+  5. Prompt cache savings formula in `PromptCacheMetrics.get_summary()` double-counted cached tokens in the denominator for OpenAI-compatible accounting.
+  6. Tool format cache dictionary had no bound, risking unbounded memory growth in long-running processes.
+- **Architectural Solution**:
+  - `makima/provider/cache.py`:
+    - Updated `partition_system_prompt()` to inspect `<memory>` and `<skills>` blocks and split across multiple `\n\n---\n\n` dividers.
+    - Updated `UnifiedPromptCacheManager._compute_tool_cache_key()` to incorporate SHA-256 canonical schema hashes and bound cache using an LRU `OrderedDict` (max capacity 256).
+    - Normalized usage metrics across OpenAI and Anthropic conventions, calculating accurate cached token ratio: `cached_tokens / max(1, prompt_tokens) * 100` without denominator duplication.
+    - Disambiguated OpenRouter routing: DeepSeek maps to `AUTOMATIC_PREFIX`, Claude to `EXPLICIT_CACHE_CONTROL`, Qwen retains model-specific explicit markers.
+  - `makima/provider/adapters/gemini.py`:
+    - Enhanced tool declaration serialization with `_serialize_declaration_schema()` producing deterministic JSON hashes for Google GenAI schema models.
+    - Elevated context cache creation fallback logging to `INFO` and recorded `self._last_cache_fallback_reason` for observability.
+- **Verification**:
+  - `tests/verify_cache_audit.py`: All 6 test suites passed with exit code 0.
+  - `tests/verify_providers.py`: Verified multi-provider KV & prompt cache coordinator with exit code 0.
+
+---
+
+### Entry 22: Model-Aware Token-Budget History Loading & Atomic Tool Pair Preservation (2026-10-27)
+- **Context & Flaw**:
+  - `HermesAgentEngine` and `EpisodicMemory` used a hardcoded, arbitrary `limit=100` message history retrieval cap. On 1M-token context models like Gemini 2.5 Flash, this artificially discarded conversational context after ~50 turns, failing to leverage large context windows.
+  - Slicing history on raw message counts or naive token cutoffs risked splitting assistant messages with `tool_calls` from their corresponding `tool` results, triggering API 400 Bad Request errors across major model providers.
+- **Architectural Solution**:
+  - `makima/memory/episodic.py`:
+    - Implemented `get_messages_by_token_budget(session_id, max_tokens, token_counter=None, max_messages=5000)`.
+    - Grouped conversation turns into atomic execution blocks (`[assistant(tool_calls=[...]), tool(1), tool(2)]`) prior to backward accumulation, ensuring tool calls and tool responses are never severed across context boundaries.
+    - Added `_parse_tool_call()` supporting both canonical `ToolCall` and OpenAI-style nested `{function: {name, arguments}}` payloads.
+    - Backward-compatible `get_recent_messages()`: delegates to `get_messages_by_token_budget` when `max_tokens` is provided, falling back to legacy count-based limits when omitted.
+  - `makima/core/engine.py`:
+    - Added `_resolve_model_and_context_limit()` resolving context limits from configured providers, router candidates, or model families (1M for Gemini, 200K for Claude, 128K for Qwen/GPT-4, 8K for smaller models).
+    - Added `_calculate_history_token_budget()` dynamically computing available history space:
+      `history_budget = context_limit - (system_prompt + current_prompt + tool_schemas + reserved_output + 10% headroom)`.
+      Capped at 400,000 tokens for 1M models to ensure transport safety while supporting thousands of turns.
+    - Pre-computed deduplicated and sorted tool schemas before calculating budget, deducting tool tokens before history is loaded.
+  - `makima/runtime.py`, `makima/api/app.py`, `makima/api/ws.py`:
+    - Updated `load_session_messages` in `makima.runtime` to support `current_prompt` and dynamic budget calculation.
+    - Unified both REST (`/api/chat`) and WebSocket (`/ws`) endpoints to load session history through `load_session_messages()`.
+- **Verification**:
+  - `tests/verify_token_budget_history.py`: All 5 live test suites passed with exit code 0 (Dynamic budget calculus, >100 message loading [250 messages verified], constrained budget backward accumulation, atomic tool pair preservation with zero orphaned tools, and runtime wiring/e2e rehydration).
+  - All existing suites passed (`verify_engine_memory.py`, `verify_memory.py`, `verify_engine.py`, `verify_cache_audit.py`, `verify_providers.py`).

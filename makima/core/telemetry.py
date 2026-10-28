@@ -27,6 +27,7 @@ logger = logging.getLogger("makima.core.telemetry")
 
 # Module-level singleton
 _TELEMETRY: Optional["StructuredTelemetry"] = None
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 
 def get_telemetry() -> "StructuredTelemetry":
@@ -140,7 +141,9 @@ class StructuredTelemetry:
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(asyncio.to_thread(_append_jsonl, log_file, jsonl_line))
+            task = loop.create_task(asyncio.to_thread(_append_jsonl, log_file, jsonl_line))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
         except RuntimeError:
             try:
                 _append_jsonl(log_file, jsonl_line)

@@ -1,52 +1,24 @@
 ---
 name: media-agent
-description: Music and video control for YouTube and Spotify Web Player, direct search URL navigation, playback controls, and volume management for Makima's Media Agent. Make sure to use this skill whenever using YouTube & Spotify Playback, Volume Control, Track Navigation.
+description: Music and audio control — playing, pausing, stopping media and closing the browser playing it.
 ---
 
-# Media Agent Skill Guide
+# Media Agent
 
-## Overview
-The **Media Agent** (`media_agent.py`) executes YouTube & Spotify Playback, Volume Control, Track Navigation within Makima's agentic ecosystem. It provides robust error handling, structured input validation, and clean asynchronous execution.
+Handles all media operations: playing songs, controlling playback, and closing the browser/app playing media.
 
-## Triggering Rules
-Make sure to trigger this skill unconditionally whenever the user requests:
-- **Primary Action**: Executing tasks related to YouTube & Spotify Playback, Volume Control, Track Navigation.
-- **Secondary Action**: Querying, inspecting, or configuring Media Agent parameters.
-- **Workflow Action**: Delegating multi-step execution requiring media-agent capabilities.
+## Tools available
 
-## Execution Protocols & Rules
+- `play_song` — open and play a song in a browser or native app
+- `control_media` — pause, resume, skip, or stop currently playing media (keeps browser open)
+- `stop_music` — stop media AND optionally close the browser/app playing it
+- `get_media_status` — get what is currently playing
+- `set_volume` / `get_volume` / `toggle_mute` — system volume control
 
-1. **Protocol Initialization**:
-   - Inspect input message parameters and validate entity types before starting task.
-   - Initialize internal agent state and logger context.
+Each tool's own description says exactly when to use it. Read those before acting.
 
-2. **Core Task Execution**:
-   - Execute domain-specific tool handlers safely using non-blocking calls.
-   - Enforce safety gates for destructive or sensitive system operations.
+## Common mistakes to avoid
 
-3. **Error Resilience & Fallbacks**:
-   - Intercept transient network or execution errors with automatic retry logic.
-   - Never crash the host process; degrade gracefully to informative status reports.
-
-4. **Safety & Anti-Pattern Rules**:
-   - NEVER bypass security boundaries or execute unauthorized destructive commands.
-   - NEVER output raw unformatted JSON walls to the user unless explicitly requested.
-
-5. **Phase-by-Phase Execution Sequence**:
-   - **Phase 1**: Parse objective parameters and validate target environment context.
-   - **Phase 2**: Dispatch asynchronous tool action and monitor execution state.
-   - **Phase 3**: Verify result payloads and compile executive report.
-
-6. **Output Presentation**:
-   - Present final deliverables using modern, clean Markdown formatting with clear section headers, bold lead-in bullet points, and code blocks.
-
-## Expected Response Structure
-```markdown
-# ⚡ Media Agent Execution Report
-- **Status**: Completed successfully
-- **Details**: Processed task parameters with 0 errors.
-```
-
-## Example Usage
-- **Input**: "execute task for media-agent"
-- **Result**: Task completed successfully with structured Markdown report.
+- Do NOT use `browser_interact(action="close")` to stop music — that closes the internal Playwright browser, not the user's Brave or Chrome.
+- Do NOT use `terminate_process` directly for media unless `stop_music` has no tracked process.
+- Do NOT call `play_song` to pause or stop something already playing — use `control_media` or `stop_music`.

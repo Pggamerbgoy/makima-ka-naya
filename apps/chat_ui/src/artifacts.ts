@@ -33,7 +33,7 @@ function tableFromMarkdown(text: string): Artifact | undefined {
 
 export function normalizeArtifact(value: unknown, fallbackTitle = 'Artifact'): Artifact {
   const raw = (value ?? {}) as Record<string, unknown>;
-  const allowedKinds: Artifact['kind'][] = ['markdown', 'image', 'video', 'audio', 'chart', 'diagram', 'table', 'code', 'html', 'document', 'diff', 'log', 'json'];
+  const allowedKinds: Artifact['kind'][] = ['markdown', 'image', 'video', 'audio', 'chart', 'diagram', 'table', 'code', 'html', 'document', 'diff', 'log', 'json', 'pdf'];
   const candidateKind = String(raw.kind ?? 'markdown') as Artifact['kind'];
   const kind = allowedKinds.includes(candidateKind) ? candidateKind : 'markdown';
   const content = typeof raw.content === 'string' ? raw.content.slice(0, MAX_ARTIFACT_TEXT) : undefined;
@@ -60,6 +60,28 @@ export function detectArtifacts(text: string): Artifact[] {
   }
   const table = tableFromMarkdown(text);
   if (table) artifacts.push(table);
+
+  // Automatically detect workspace document references (e.g. reports/sample.pdf, documents/summary.docx)
+  const fileRegex = /(?:[\s(]|^|['"`])([a-zA-Z0-9_\-\\/]+\.(pdf|docx|xlsx|pptx|html))(?=[\s),.'"`]|$)/gi;
+  let fileMatch: RegExpExecArray | null;
+  const seenPaths = new Set<string>();
+  while ((fileMatch = fileRegex.exec(text))) {
+    const rawPath = fileMatch[1].replace(/\\/g, '/').replace(/^\.?\//, '');
+    if (seenPaths.has(rawPath.toLowerCase())) continue;
+    seenPaths.add(rawPath.toLowerCase());
+    const ext = fileMatch[2].toLowerCase();
+    const fileName = rawPath.split('/').pop() || rawPath;
+    const kind: Artifact['kind'] = ext === 'pdf' ? 'pdf' : 'document';
+    artifacts.push({
+      id: id(),
+      kind,
+      title: fileName,
+      url: `/api/workspace/files/${rawPath}`,
+      metadata: { file_path: rawPath, file_name: fileName, extension: `.${ext}` },
+      downloadable: true,
+    });
+  }
+
   return artifacts;
 }
 

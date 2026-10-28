@@ -8,9 +8,10 @@ Zero-Cost Policy: Exclusively routes through free-tier quotas and 100% offline l
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 from makima.config import BackendConfig, MakimaSettings, get_settings
@@ -246,6 +247,7 @@ class ParetoRouter:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         preferred_backend: Optional[str] = None,
+        on_chunk: Optional[Callable[[str], Any]] = None,
         **kwargs,
     ) -> ProviderResponse:
         """
@@ -317,6 +319,7 @@ class ParetoRouter:
 
         last_error: Optional[Exception] = None
         cloud_error: Optional[Exception] = None
+        prefix_text: str = ""
 
         for candidate in candidates:
             provider = candidate.provider
@@ -338,10 +341,71 @@ class ParetoRouter:
                 logger.debug("Skipping unprobed/offline local Ollama daemon after cloud error.")
                 continue
 
+            # If a previous candidate suffered mid-stream failure, construct continuation prompt
+            if prefix_text:
+                continuation_msg = Message(role="assistant", content=prefix_text)
+                continuation_directive = Message(
+                    role="user",
+                    content=(
+                        "[SYSTEM DIRECTIVE: The previous model stream disconnected mid-sentence. "
+                        "Continue generating the remaining response starting immediately from the exact "
+                        f"last word of the text above. Do NOT repeat or restart: '{prefix_text[-80:]}']"
+                    ),
+                )
+                resumed_messages = list(messages) + [continuation_msg, continuation_directive]
+            else:
+                resumed_messages = messages
+
             try:
                 start_time = time.monotonic()
+                if on_chunk and not tools and hasattr(provider, "stream"):
+                    try:
+                        accumulated_parts = []
+                        last_finish = "stop"
+                        async for chunk in provider.stream(
+                            messages=resumed_messages,
+                            system_prompt=system_prompt,
+                            tools=tools,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            **kwargs,
+                        ):
+                            if chunk.delta:
+                                accumulated_parts.append(chunk.delta)
+                                cb = on_chunk(chunk.delta)
+                                if inspect.isawaitable(cb):
+                                    await cb
+                            if chunk.finish_reason:
+                                last_finish = chunk.finish_reason
+                        elapsed_ms = (time.monotonic() - start_time) * 1000.0
+                        if metrics:
+                            metrics.update_success(elapsed_ms)
+                        continuation_text = "".join(accumulated_parts)
+                        full_content = prefix_text + continuation_text
+                        return ProviderResponse(
+                            content=full_content,
+                            tool_calls=[],
+                            finish_reason=last_finish,
+                            model=getattr(provider.config, "model", backend_name),
+                        )
+                    except NotImplementedError:
+                        pass
+                    except Exception as stream_err:
+                        if len(accumulated_parts) > 0:
+                            prefix_text += "".join(accumulated_parts)
+                            if metrics:
+                                metrics.update_failure()
+                            logger.warning(
+                                f"Mid-stream failure on '{backend_name}' after {len(accumulated_parts)} chunks. Cascading with suffix continuation to next provider."
+                            )
+                            last_error = stream_err
+                            if backend_name != "ollama":
+                                cloud_error = stream_err
+                            continue
+                        raise stream_err
+
                 response = await provider.generate(
-                    messages=messages,
+                    messages=resumed_messages,
                     system_prompt=system_prompt,
                     tools=tools,
                     temperature=temperature,
@@ -352,6 +416,14 @@ class ParetoRouter:
 
                 if metrics:
                     metrics.update_success(elapsed_ms)
+
+                if prefix_text:
+                    continuation_text = response.content or ""
+                    if on_chunk and continuation_text:
+                        cb = on_chunk(continuation_text)
+                        if inspect.isawaitable(cb):
+                            await cb
+                    response.content = prefix_text + continuation_text
 
                 return response
 

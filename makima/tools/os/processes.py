@@ -243,8 +243,26 @@ def get_process_info(
 
 @tool(
     name="terminate_process",
-    description="Terminate or kill a running process by PID or process name.",
+    description="Terminate a running process by PID or process name.",
     tags=["os", "process", "control"],
+    purpose="Manage a specific operating-system process by its identity.",
+    capabilities=[
+        "Request graceful termination or forceful termination of a process.",
+        "Identify the target by PID or process name.",
+    ],
+    use_when=[
+        "The user explicitly requests ending a process rather than just closing its window.",
+        "The target process has been identified and the requested termination mode is appropriate.",
+    ],
+    avoid_when=[
+        "A normal application-close operation is sufficient and should preserve unsaved-work handling.",
+        "The request concerns playback state, a browser tab, or an entire operating-system shutdown.",
+        "The target is ambiguous or a protected/system process.",
+    ],
+    examples=[
+        "Inspect a process and then request graceful termination by PID.",
+    ],
+    side_effect="Terminates a process; forceful termination can lose unsaved work or data.",
 )
 def terminate_process(
     pid: Optional[int] = None,

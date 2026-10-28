@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Activity, AudioLines, Check, Code2, Copy, Download, FileJson, FileText, Image as ImageIcon, LayoutDashboard, Maximize2, PanelRight, RefreshCw, Table2, Video } from 'lucide-react';
+import { Activity, AudioLines, Check, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, Image as ImageIcon, LayoutDashboard, Maximize2, PanelRight, RefreshCw, Table2, Video } from 'lucide-react';
 import type { Artifact } from '../types';
 import { artifactFileName, downloadArtifact, safeArtifactUrl, sanitizeArtifactHtml } from '../artifacts';
 import { Button, EmptyState } from './ui';
@@ -84,7 +84,109 @@ const MediaCard = memo(function MediaCard({ artifact, onCanvas, onFullscreen }: 
   return <section className="artifact-card media-card"><header><span>{artifact.kind === 'image' ? <ImageIcon size={15} /> : artifact.kind === 'video' ? <Video size={15} /> : <AudioLines size={15} />} {artifact.title ?? artifact.kind}</span><ArtifactActions artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} /></header><div className={`media-stage ${unavailable ? 'failed' : ''}`}>{unavailable ? <EmptyState text={failed ? 'Media failed to load' : 'Media URL is blocked for safety'} action={failed ? <Button onClick={() => setFailed(false)}><RefreshCw size={13} /> Retry</Button> : undefined} /> : artifact.kind === 'image' ? <img src={src} alt={String(artifact.metadata?.alt ?? artifact.title ?? 'Makima image')} onError={() => setFailed(true)} /> : artifact.kind === 'video' ? <video src={src} controls onError={() => setFailed(true)} /> : <audio src={src} controls onError={() => setFailed(true)} />}</div></section>;
 });
 
+const DocumentCard = memo(function DocumentCard({
+  artifact,
+  onCanvas,
+  onFullscreen,
+}: {
+  artifact: Artifact;
+  onCanvas: (artifact: Artifact) => void;
+  onFullscreen?: (artifact: Artifact) => void;
+}) {
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const ext =
+    (artifact.metadata?.extension as string) ||
+    (artifact.title?.slice(artifact.title.lastIndexOf('.')).toLowerCase()) ||
+    '';
+  const isPdf = artifact.kind === 'pdf' || ext === '.pdf' || artifact.mime_type === 'application/pdf';
+  const url = artifact.url;
+  const fileName = artifact.title || (artifact.metadata?.file_name as string) || 'Document';
+  const sizeBytes = Number(artifact.metadata?.size_bytes || 0);
+  const sizeStr =
+    sizeBytes > 1024 * 1024
+      ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+      : sizeBytes > 0
+        ? `${(sizeBytes / 1024).toFixed(1)} KB`
+        : '';
+
+  return (
+    <section className="artifact-card document-card">
+      <header>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <FileText size={16} style={{ color: 'var(--accent, #38bdf8)' }} />
+          <strong>{fileName}</strong>
+          {ext && (
+            <span
+              className="model-picker-badge"
+              style={{ textTransform: 'uppercase', fontSize: 10, padding: '2px 5px' }}
+            >
+              {ext.replace('.', '')}
+            </span>
+          )}
+          {sizeStr && <small className="muted" style={{ opacity: 0.7 }}>({sizeStr})</small>}
+        </span>
+        <div className="artifact-actions">
+          <Button
+            onClick={() => setPreviewOpen(!previewOpen)}
+            title={previewOpen ? 'Hide preview' : 'Show preview'}
+            aria-label={previewOpen ? 'Hide preview' : 'Show preview'}
+          >
+            {previewOpen ? <EyeOff size={13} /> : <Eye size={13} />}
+            <span style={{ marginLeft: 4 }}>{previewOpen ? 'Hide' : 'Preview'}</span>
+          </Button>
+          {url && (
+            <Button
+              onClick={() => window.open(url, '_blank')}
+              title="Open document in new tab"
+              aria-label="Open document in new tab"
+            >
+              <ExternalLink size={13} />
+            </Button>
+          )}
+          <ArtifactActions artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />
+        </div>
+      </header>
+
+      {previewOpen && (
+        <div className="document-preview-stage" style={{ marginTop: 8 }}>
+          {isPdf && url ? (
+            <iframe
+              src={url}
+              title={fileName}
+              style={{
+                width: '100%',
+                height: '520px',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                background: '#fff',
+              }}
+            />
+          ) : artifact.content ? (
+            <div className="code-scroll" style={{ maxHeight: '380px', overflowY: 'auto', padding: 12 }}>
+              <pre><code>{artifact.content}</code></pre>
+            </div>
+          ) : (
+            <div style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--muted)', background: 'var(--bg-card, rgba(255,255,255,0.03))', borderRadius: '8px' }}>
+              <FileText size={28} style={{ margin: '0 auto 8px auto', opacity: 0.6 }} />
+              <div>Document ready in workspace:</div>
+              <code style={{ fontSize: 12, marginTop: 4, display: 'inline-block' }}>{String(artifact.metadata?.file_path || fileName)}</code>
+              {url && (
+                <div style={{ marginTop: 12 }}>
+                  <Button onClick={() => window.open(url, '_blank')} style={{ background: 'var(--accent)', color: '#fff' }}>
+                    <ExternalLink size={13} /> Open / Download Document
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+});
+
 export const ArtifactCard = memo(function ArtifactCard({ artifact, onCanvas, onFullscreen }: { artifact: Artifact; onCanvas: (artifact: Artifact) => void; onFullscreen?: (artifact: Artifact) => void }) {
+  if (artifact.kind === 'pdf' || artifact.kind === 'document') return <DocumentCard artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />;
   if (artifact.kind === 'code' || artifact.kind === 'diff' || artifact.kind === 'log') return <CodeCard artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />;
   if (artifact.kind === 'table') return <TableCard artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />;
   if (artifact.kind === 'chart') return <ChartCard artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />;

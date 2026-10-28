@@ -648,6 +648,12 @@ def build_parser() -> argparse.ArgumentParser:
     # overlay subcommand
     subparsers.add_parser("overlay", help="Launch the native Windows Spotlight HUD overlay")
 
+    # desktop subcommand
+    desktop_p = subparsers.add_parser("desktop", help="Launch Makima as a native desktop application with UI & background server")
+    desktop_p.add_argument("--host", default="127.0.0.1", help="Host address for backend server")
+    desktop_p.add_argument("--port", type=int, default=8000, help="Port for backend server")
+    desktop_p.add_argument("--debug", action="store_true", help="Enable verbose server logging")
+
     return parser
 
 
@@ -719,8 +725,20 @@ def cli_main(
         hud.mainloop()
         return 0
 
+    if parsed.subcommand == "desktop":
+        from makima.desktop.launcher import run_desktop
+        return run_desktop(
+            host=getattr(parsed, "host", "127.0.0.1"),
+            port=getattr(parsed, "port", 8000),
+            debug=getattr(parsed, "debug", False),
+        )
+
     parser.print_help()
     return 0
+
+
+# Export entrypoint alias for packaging compatibility
+app = cli_main
 
 
 if __name__ == "__main__":

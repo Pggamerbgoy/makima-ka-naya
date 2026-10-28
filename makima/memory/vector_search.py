@@ -147,66 +147,69 @@ class VectorSearchEngine:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def connect(self) -> None:
-        """Opens the SQLite connection and sets up the vec0 virtual table."""
-        async with self._lock:
-            if self._conn is not None:
-                return
+    def _sync_connect(self) -> None:
+        """Internal synchronous setup of SQLite and vec0 virtual table."""
+        if isinstance(self.db_path, Path):
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if isinstance(self.db_path, Path):
-                self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=30.0)
+        conn.row_factory = sqlite3.Row
 
-            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-            conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS doc_metadata (
+                doc_id         TEXT PRIMARY KEY,
+                text           TEXT NOT NULL,
+                metadata       TEXT,
+                embedding_json TEXT
+            );
+            """
+        )
 
-            conn.execute("PRAGMA journal_mode=WAL;")
+        if _HAS_SQLITE_VEC:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)  # type: ignore[attr-defined]
+            conn.enable_load_extension(False)
+
             conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS doc_metadata (
-                    doc_id         TEXT PRIMARY KEY,
-                    text           TEXT NOT NULL,
-                    metadata       TEXT,
-                    embedding_json TEXT
+                f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
+                    doc_id TEXT PRIMARY KEY,
+                    embedding FLOAT[{self.vector_dim}]
                 );
                 """
             )
+            logger.info(
+                f"VectorSearchEngine connected (sqlite-vec {sqlite_vec.__version__}) "  # type: ignore[union-attr]
+                f"→ {self.db_path}"
+            )
+        else:
+            rows = conn.execute("SELECT doc_id, text, metadata, embedding_json FROM doc_metadata;").fetchall()
+            self._fallback_docs = [
+                {
+                    "id": r["doc_id"],
+                    "text": r["text"],
+                    "vector": json.loads(r["embedding_json"]) if r["embedding_json"] else [],
+                    "metadata": json.loads(r["metadata"]) if r["metadata"] else None,
+                }
+                for r in rows if r["embedding_json"]
+            ]
+            logger.info(
+                f"VectorSearchEngine connected (fallback cosine mode with {len(self._fallback_docs)} persisted docs) → {self.db_path}"
+            )
 
-            if _HAS_SQLITE_VEC:
-                # Load sqlite-vec extension
-                conn.enable_load_extension(True)
-                sqlite_vec.load(conn)  # type: ignore[attr-defined]
-                conn.enable_load_extension(False)
+        conn.commit()
+        self._conn = conn
 
-                conn.execute(
-                    f"""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
-                        doc_id TEXT PRIMARY KEY,
-                        embedding FLOAT[{self.vector_dim}]
-                    );
-                    """
-                )
-                logger.info(
-                    f"VectorSearchEngine connected (sqlite-vec {sqlite_vec.__version__}) "  # type: ignore[union-attr]
-                    f"→ {self.db_path}"
-                )
-            else:
-                # Load persisted vectors from disk into fallback memory on startup
-                rows = conn.execute("SELECT doc_id, text, metadata, embedding_json FROM doc_metadata;").fetchall()
-                self._fallback_docs = [
-                    {
-                        "id": r["doc_id"],
-                        "text": r["text"],
-                        "vector": json.loads(r["embedding_json"]) if r["embedding_json"] else [],
-                        "metadata": json.loads(r["metadata"]) if r["metadata"] else None,
-                    }
-                    for r in rows if r["embedding_json"]
-                ]
-                logger.info(
-                    f"VectorSearchEngine connected (fallback cosine mode with {len(self._fallback_docs)} persisted docs) → {self.db_path}"
-                )
-
-            conn.commit()
-            self._conn = conn
+    async def connect(self) -> None:
+        """Opens the SQLite connection and sets up the vec0 virtual table off the main event loop."""
+        async with self._lock:
+            if self._conn is not None:
+                return
+            await asyncio.to_thread(self._sync_connect)
 
     def _get_embedder(self) -> Any:
         """Lazy-loads the fastembed TextEmbedding model (downloads on first use)."""
@@ -279,43 +282,46 @@ class VectorSearchEngine:
         metadata_str = json.dumps(metadata, ensure_ascii=False) if metadata else None
 
         async with self._lock:
-            conn = self._conn
-            assert conn is not None
+            def _sync_add():
+                conn = self._conn
+                assert conn is not None
 
-            if _HAS_SQLITE_VEC:
-                # Upsert into sqlite-vec virtual table
-                conn.execute(
-                    "DELETE FROM vec_documents WHERE doc_id = ?;", (doc_id,)
-                )
-                conn.execute(
-                    "INSERT INTO vec_documents (doc_id, embedding) VALUES (?, ?);",
-                    (doc_id, _encode_vector(vec)),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO doc_metadata (doc_id, text, metadata, embedding_json)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(doc_id) DO UPDATE SET text=excluded.text, metadata=excluded.metadata;
-                    """,
-                    (doc_id, text, metadata_str, None),
-                )
-                conn.commit()
-            else:
-                # Fallback: in-memory list + persistent SQLite storage
-                embedding_json = json.dumps(vec)
-                conn.execute(
-                    """
-                    INSERT INTO doc_metadata (doc_id, text, metadata, embedding_json)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(doc_id) DO UPDATE SET text=excluded.text, metadata=excluded.metadata, embedding_json=excluded.embedding_json;
-                    """,
-                    (doc_id, text, metadata_str, embedding_json),
-                )
-                conn.commit()
-                self._fallback_docs = [d for d in self._fallback_docs if d["id"] != doc_id]
-                self._fallback_docs.append(
-                    {"id": doc_id, "text": text, "vector": vec, "metadata": metadata}
-                )
+                if _HAS_SQLITE_VEC:
+                    # Upsert into sqlite-vec virtual table
+                    conn.execute(
+                        "DELETE FROM vec_documents WHERE doc_id = ?;", (doc_id,)
+                    )
+                    conn.execute(
+                        "INSERT INTO vec_documents (doc_id, embedding) VALUES (?, ?);",
+                        (doc_id, _encode_vector(vec)),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO doc_metadata (doc_id, text, metadata, embedding_json)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(doc_id) DO UPDATE SET text=excluded.text, metadata=excluded.metadata;
+                        """,
+                        (doc_id, text, metadata_str, None),
+                    )
+                    conn.commit()
+                else:
+                    # Fallback: in-memory list + persistent SQLite storage
+                    embedding_json = json.dumps(vec)
+                    conn.execute(
+                        """
+                        INSERT INTO doc_metadata (doc_id, text, metadata, embedding_json)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(doc_id) DO UPDATE SET text=excluded.text, metadata=excluded.metadata, embedding_json=excluded.embedding_json;
+                        """,
+                        (doc_id, text, metadata_str, embedding_json),
+                    )
+                    conn.commit()
+                    self._fallback_docs = [d for d in self._fallback_docs if d["id"] != doc_id]
+                    self._fallback_docs.append(
+                        {"id": doc_id, "text": text, "vector": vec, "metadata": metadata}
+                    )
+
+            await asyncio.to_thread(_sync_add)
 
     async def search(
         self,
@@ -343,63 +349,66 @@ class VectorSearchEngine:
         q_vec = q_vector[0]
 
         async with self._lock:
-            conn = self._conn
-            assert conn is not None
+            def _sync_search():
+                conn = self._conn
+                assert conn is not None
 
-            if _HAS_SQLITE_VEC:
-                # sqlite-vec KNN query
-                rows = conn.execute(
-                    """
-                    SELECT v.doc_id, m.text, m.metadata, v.distance
-                    FROM vec_documents v
-                    JOIN doc_metadata m ON m.doc_id = v.doc_id
-                    WHERE v.embedding MATCH ?
-                      AND k = ?
-                    ORDER BY v.distance ASC;
-                    """,
-                    (_encode_vector(q_vec), top_k),
-                ).fetchall()
+                if _HAS_SQLITE_VEC:
+                    # sqlite-vec KNN query
+                    rows = conn.execute(
+                        """
+                        SELECT v.doc_id, m.text, m.metadata, v.distance
+                        FROM vec_documents v
+                        JOIN doc_metadata m ON m.doc_id = v.doc_id
+                        WHERE v.embedding MATCH ?
+                          AND k = ?
+                        ORDER BY v.distance ASC;
+                        """,
+                        (_encode_vector(q_vec), top_k),
+                    ).fetchall()
 
-                results = []
-                for row in rows:
-                    # For normalized vectors: cosine_sim = 1 - (L2_distance^2) / 2
-                    dist = float(row["distance"])
-                    score = max(0.0, 1.0 - (dist * dist) / 2.0)
-                    if score < min_score:
-                        continue
-                    meta = None
-                    if row["metadata"]:
-                        try:
-                            meta = json.loads(row["metadata"])
-                        except Exception:
-                            meta = row["metadata"]
-                    results.append(
+                    results = []
+                    for row in rows:
+                        # For normalized vectors: cosine_sim = 1 - (L2_distance^2) / 2
+                        dist = float(row["distance"])
+                        score = max(0.0, 1.0 - (dist * dist) / 2.0)
+                        if score < min_score:
+                            continue
+                        meta = None
+                        if row["metadata"]:
+                            try:
+                                meta = json.loads(row["metadata"])
+                            except Exception:
+                                meta = row["metadata"]
+                        results.append(
+                            {
+                                "doc_id": row["doc_id"],
+                                "text": row["text"],
+                                "score": round(score, 4),
+                                "metadata": meta,
+                            }
+                        )
+                    return results
+
+                else:
+                    # Fallback: brute-force cosine over in-memory list
+                    scored = []
+                    for doc in self._fallback_docs:
+                        score = _cosine_similarity(q_vec, doc["vector"])
+                        if score >= min_score:
+                            scored.append((score, doc))
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    return [
                         {
-                            "doc_id": row["doc_id"],
-                            "text": row["text"],
-                            "score": round(score, 4),
-                            "metadata": meta,
+                            "doc_id": d["id"],
+                            "text": d["text"],
+                            "score": round(s, 4),
+                            "metadata": d["metadata"],
                         }
-                    )
-                return results
+                        for s, d in scored[:top_k]
+                    ]
 
-            else:
-                # Fallback: brute-force cosine over in-memory list
-                scored = []
-                for doc in self._fallback_docs:
-                    score = _cosine_similarity(q_vec, doc["vector"])
-                    if score >= min_score:
-                        scored.append((score, doc))
-                scored.sort(key=lambda x: x[0], reverse=True)
-                return [
-                    {
-                        "doc_id": d["id"],
-                        "text": d["text"],
-                        "score": round(s, 4),
-                        "metadata": d["metadata"],
-                    }
-                    for s, d in scored[:top_k]
-                ]
+            return await asyncio.to_thread(_sync_search)
 
     async def delete_document(self, doc_id: str) -> bool:
         """Removes a document from the index. Returns True if found and deleted."""
@@ -434,12 +443,20 @@ class VectorSearchEngine:
                 return len(self._fallback_docs)
 
     async def close(self) -> None:
-        """Closes the SQLite connection."""
+        """Closes the SQLite connection and truncates the WAL log."""
         async with self._lock:
             if self._conn is not None:
-                self._conn.close()
-                self._conn = None
-                logger.debug("VectorSearchEngine closed.")
+                def _sync_close():
+                    if self._conn is not None:
+                        try:
+                            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                            self._conn.execute("PRAGMA optimize;")
+                        except Exception:
+                            pass
+                        self._conn.close()
+                        self._conn = None
+                await asyncio.to_thread(_sync_close)
+                logger.debug("VectorSearchEngine closed with WAL truncation.")
 
     # ------------------------------------------------------------------
     # Context manager support

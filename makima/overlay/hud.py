@@ -30,14 +30,60 @@ import webbrowser
 
 try:
     import psutil
+    import win32clipboard
     import win32con
     import win32gui
     import win32process
 except ImportError:
     psutil = None
+    win32clipboard = None
     win32con = None
     win32gui = None
     win32process = None
+
+
+def _get_clipboard_text_safe(fallback_root: Optional[Any] = None) -> str:
+    """Thread-safe clipboard read across Win32 and Tkinter."""
+    if win32clipboard and win32con:
+        try:
+            win32clipboard.OpenClipboard()
+            try:
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                    val = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                    return str(val) if val is not None else ""
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+    if fallback_root:
+        try:
+            return fallback_root.clipboard_get()
+        except Exception:
+            pass
+    return ""
+
+
+def _set_clipboard_text_safe(text: str, fallback_root: Optional[Any] = None) -> bool:
+    """Thread-safe clipboard write across Win32 and Tkinter."""
+    if win32clipboard and win32con:
+        try:
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, str(text))
+                return True
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+    if fallback_root:
+        try:
+            fallback_root.clipboard_clear()
+            fallback_root.clipboard_append(text)
+            return True
+        except Exception:
+            pass
+    return False
 
 
 from makima.core.engine import HermesAgentEngine
@@ -168,6 +214,7 @@ class SpotlightHUD:
         # 6. Global Key Bindings
         self.root.bind("<Escape>", lambda e: self.hide())
         self.root.bind("<FocusOut>", self._on_focus_out)
+        self.root.protocol("WM_DELETE_WINDOW", self.destroy)
 
         # 7. Ambient Pulsing Animations (Status Dot & Equalizer)
         self._start_ambient_animations()
@@ -1267,19 +1314,10 @@ class SpotlightHUD:
 
     def _capture_selection_from_foreground(self) -> None:
         """Simulates Ctrl+C on active window to peek highlighted selection with clipboard preservation."""
-        prev_clip = None
-        try:
-            prev_clip = self.root.clipboard_get()
-        except Exception:
-            prev_clip = ""
+        prev_clip = _get_clipboard_text_safe(fallback_root=self.root)
 
         sentinel = f"__makima_peek_{time.time()}__"
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(sentinel)
-            self.root.update()
-        except Exception:
-            pass
+        _set_clipboard_text_safe(sentinel, fallback_root=self.root)
 
         try:
             VK_CONTROL = 0x11
@@ -1287,30 +1325,21 @@ class SpotlightHUD:
             KEYEVENTF_KEYUP = 0x0002
             ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
             ctypes.windll.user32.keybd_event(VK_C, 0, 0, 0)
-            time.sleep(0.015)
+            time.sleep(0.02)
             ctypes.windll.user32.keybd_event(VK_C, 0, KEYEVENTF_KEYUP, 0)
             ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.025)
+            time.sleep(0.03)
         except Exception:
             pass
 
-        new_clip = None
-        try:
-            new_clip = self.root.clipboard_get()
-        except Exception:
-            new_clip = ""
+        new_clip = _get_clipboard_text_safe(fallback_root=self.root)
 
         if new_clip and new_clip != sentinel and new_clip.strip():
             self.captured_selection = new_clip.strip()
         else:
             self.captured_selection = ""
             if prev_clip:
-                try:
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(prev_clip)
-                    self.root.update()
-                except Exception:
-                    pass
+                _set_clipboard_text_safe(prev_clip, fallback_root=self.root)
 
     def _update_context_chip_display(self) -> None:
         """Renders or hides the context chip based on current captured state."""
@@ -1357,13 +1386,7 @@ class SpotlightHUD:
             return False
 
         to_paste = self._extract_code_or_text(content)
-
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(to_paste)
-            self.root.update()
-        except Exception as exc:
-            logger.debug("Clipboard set notice: %s", exc)
+        _set_clipboard_text_safe(to_paste, fallback_root=self.root)
 
         self.hide()
 
@@ -1605,6 +1628,12 @@ class SpotlightHUD:
     def destroy(self) -> None:
         """Cleanly destroys the HUD root window and cancels background timers."""
         self._is_alive = False
+        if hasattr(self, "_hotkey_listener") and self._hotkey_listener:
+            try:
+                self._hotkey_listener.stop()
+            except Exception:
+                pass
+            self._hotkey_listener = None
         if hasattr(self, "_ambient_after_id") and self._ambient_after_id and self.root:
             try:
                 self.root.after_cancel(self._ambient_after_id)

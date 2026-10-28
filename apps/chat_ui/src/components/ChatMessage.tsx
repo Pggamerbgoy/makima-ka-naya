@@ -52,6 +52,7 @@ type Props = {
   onFullscreen: (artifact: Artifact) => void;
   onSelectSuggestion?: (suggestion: string) => void;
   onStop?: (id: string) => void;
+  onPermissionResponse?: (permissionId: string, allowed: boolean) => void;
 };
 
 const REACTION_OPTIONS = ['👍', '❤️', '💡', '🚀'];
@@ -116,11 +117,20 @@ function formatResultPreview(result: unknown): string {
   }
 }
 
-function ExecutionStepItem({ step, isLive }: { step: ExecutionStep; isLive?: boolean }) {
+function ExecutionStepItem({
+  step,
+  isLive,
+  onPermissionResponse,
+}: {
+  step: ExecutionStep;
+  isLive?: boolean;
+  onPermissionResponse?: (permissionId: string, allowed: boolean) => void;
+}) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const isThought = step.type === 'thought';
   const isFailed = step.status === 'failed';
   const isRunning = step.status === 'running';
+  const isAwaitingApproval = step.status === 'awaiting_approval';
 
   const duration = step.durationMs ?? step.duration_ms;
   const argSummary = useMemo(() => formatArgSummary(step.arguments), [step.arguments]);
@@ -132,6 +142,8 @@ function ExecutionStepItem({ step, isLive }: { step: ExecutionStep; isLive?: boo
       <div className={`step-timeline-icon ${step.status}`}>
         {isRunning ? (
           <div className="step-spinner" />
+        ) : isAwaitingApproval ? (
+          <AlertTriangle size={12} className="text-amber-400" />
         ) : isFailed ? (
           <AlertTriangle size={12} className="text-error" />
         ) : isThought ? (
@@ -157,6 +169,11 @@ function ExecutionStepItem({ step, isLive }: { step: ExecutionStep; isLive?: boo
           </div>
           <div className="step-meta-wrap">
             {duration ? <span className="step-duration">{duration}ms</span> : null}
+            {isAwaitingApproval ? (
+              <span className="step-badge border border-amber-500/40 bg-amber-500/10 text-amber-400">
+                Awaiting Approval
+              </span>
+            ) : null}
             {isFailed ? <span className="step-badge error">Failed</span> : null}
             {isRunning ? <span className="step-badge running">Running…</span> : null}
             {hasDetails ? (
@@ -167,7 +184,49 @@ function ExecutionStepItem({ step, isLive }: { step: ExecutionStep; isLive?: boo
           </div>
         </div>
 
-        {detailsOpen && hasDetails && (
+        {isAwaitingApproval && (
+          <div className="mt-2.5 p-3 rounded-lg border border-amber-500/50 bg-amber-500/10 text-amber-200">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-400 text-xs mb-1.5">
+              <span aria-hidden="true">⚠️</span>
+              <span>Security Permission Required</span>
+            </div>
+            <div className="text-xs text-amber-200/90 mb-1.5">
+              Tool <strong className="font-mono text-amber-300 font-semibold">{step.name || 'Action'}</strong> requests execution:
+            </div>
+            {step.arguments && (
+              <pre className="mb-2.5 p-2 rounded bg-black/40 text-[11px] font-mono text-amber-100 overflow-x-auto max-h-48 border border-amber-500/20 whitespace-pre-wrap">
+                {typeof step.arguments === 'object' && step.arguments !== null
+                  ? JSON.stringify(step.arguments, null, 2)
+                  : String(step.arguments)}
+              </pre>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white transition-colors flex items-center gap-1 cursor-pointer shadow-sm border border-emerald-400/30"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPermissionResponse?.(step.permission_id || step.id, true);
+                }}
+              >
+                <Check size={12} />
+                <span>Allow Once</span>
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded text-xs font-semibold bg-rose-600/90 hover:bg-rose-500 active:bg-rose-700 text-white transition-colors flex items-center gap-1 cursor-pointer shadow-sm border border-rose-400/30"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPermissionResponse?.(step.permission_id || step.id, false);
+                }}
+              >
+                <span>Deny</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {detailsOpen && hasDetails && !isAwaitingApproval && (
           <div className="step-details-panel">
             {step.arguments && typeof step.arguments === 'object' && Object.keys(step.arguments).length > 0 && (
               <div className="step-details-section">
@@ -201,6 +260,8 @@ function ExecutionStepsAccordion({
   onStop,
   messageId,
   hasError,
+  onPermissionResponse,
+  hasContent,
 }: {
   steps?: ExecutionStep[];
   messagePending?: boolean;
@@ -208,11 +269,13 @@ function ExecutionStepsAccordion({
   onStop?: (id: string) => void;
   messageId: string;
   hasError?: boolean;
+  onPermissionResponse?: (permissionId: string, allowed: boolean) => void;
+  hasContent?: boolean;
 }) {
-  const [isOpen, setIsOpen] = useState(() => Boolean(hasError || steps?.some((s) => s.status === 'failed')));
+  const [isOpen, setIsOpen] = useState(() => Boolean(hasError || steps?.some((s) => s.status === 'failed' || s.status === 'awaiting_approval')));
 
   if (!steps || steps.length === 0) {
-    if (messagePending) {
+    if (messagePending && !hasContent) {
       return (
         <div className="thinking-stage" aria-label="Makima is working">
           <div className="thinking-header">
@@ -242,6 +305,7 @@ function ExecutionStepsAccordion({
 
   const toolSteps = steps.filter((s) => s.type === 'tool');
   const failedStep = steps.find((s) => s.status === 'failed');
+  const awaitingStep = steps.find((s) => s.status === 'awaiting_approval');
   const uniqueTools = Array.from(new Set(toolSteps.map((s) => s.name).filter(Boolean))) as string[];
   const totalDuration = steps.reduce((acc, s) => acc + (s.durationMs ?? s.duration_ms ?? 0), 0);
 
@@ -251,7 +315,7 @@ function ExecutionStepsAccordion({
         <div className="thinking-header">
           <div className="aurora-pulse">
             <Sparkles size={13} className="aurora-sparkle" />
-            <span>{currentStage || (uniqueTools.length ? `Executing ${uniqueTools[uniqueTools.length - 1]}…` : 'Makima is reasoning…')}</span>
+            <span>{currentStage || (awaitingStep ? `Waiting for permission: ${awaitingStep.name || 'action'}…` : uniqueTools.length ? `Executing ${uniqueTools[uniqueTools.length - 1]}…` : 'Makima is reasoning…')}</span>
           </div>
           {onStop && (
             <button
@@ -269,22 +333,24 @@ function ExecutionStepsAccordion({
 
         <div className="execution-timeline live">
           {steps.map((step) => (
-            <ExecutionStepItem key={step.id} step={step} isLive />
+            <ExecutionStepItem key={step.id} step={step} isLive onPermissionResponse={onPermissionResponse} />
           ))}
         </div>
-        <div className="typing"><i /><i /><i /></div>
+        {!hasContent && <div className="typing"><i /><i /><i /></div>}
       </div>
     );
   }
 
-  const summaryTitle = failedStep
+  const summaryTitle = awaitingStep
+    ? `Permission required: ${awaitingStep.name || 'action'}`
+    : failedStep
     ? `Stopped at step: ${failedStep.name || 'action'} (${failedStep.error ? failedStep.error.slice(0, 50) : 'Failed'})`
     : toolSteps.length > 0
     ? `Thought & executed ${toolSteps.length} step${toolSteps.length === 1 ? '' : 's'}`
     : `Thought process (${steps.length} steps)`;
 
   return (
-    <div className={`execution-steps-accordion ${failedStep ? 'has-failure' : ''}`}>
+    <div className={`execution-steps-accordion ${failedStep ? 'has-failure' : awaitingStep ? 'has-permission' : ''}`}>
       <button
         type="button"
         className="execution-steps-summary"
@@ -292,7 +358,9 @@ function ExecutionStepsAccordion({
         aria-expanded={isOpen}
       >
         <div className="summary-left">
-          {failedStep ? (
+          {awaitingStep ? (
+            <AlertTriangle size={13} className="text-amber-400 summary-icon" />
+          ) : failedStep ? (
             <AlertTriangle size={13} className="text-warning summary-icon" />
           ) : (
             <Brain size={13} className="summary-icon" />
@@ -319,7 +387,7 @@ function ExecutionStepsAccordion({
         <div className="execution-steps-body">
           <div className="execution-timeline">
             {steps.map((step) => (
-              <ExecutionStepItem key={step.id} step={step} />
+              <ExecutionStepItem key={step.id} step={step} onPermissionResponse={onPermissionResponse} />
             ))}
           </div>
         </div>
@@ -338,7 +406,17 @@ function downloadMarkdown(content: string, id: string) {
   URL.revokeObjectURL(url);
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, copied, onCopy, onRetry, onCanvas, onFullscreen, onSelectSuggestion, onStop }: Props) {
+export const ChatMessage = memo(function ChatMessage({
+  message,
+  copied,
+  onCopy,
+  onRetry,
+  onCanvas,
+  onFullscreen,
+  onSelectSuggestion,
+  onStop,
+  onPermissionResponse,
+}: Props) {
   const timestamp = useMemo(() => {
     return message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   }, [message.createdAt]);
@@ -403,12 +481,26 @@ export const ChatMessage = memo(function ChatMessage({ message, copied, onCopy, 
           onStop={onStop}
           messageId={message.id}
           hasError={Boolean(message.error)}
+          onPermissionResponse={onPermissionResponse}
+          hasContent={Boolean(message.content)}
         />
       )}
-      {message.role === 'assistant' && message.pending && (!message.steps || message.steps.length === 0) ? null : showRaw ? (
-        <pre className="raw-markdown-view">{message.content || ''}</pre>
+      {message.role === 'assistant' && message.pending && !message.content && (!message.steps || message.steps.length === 0) ? null : showRaw ? (
+        <pre className="raw-markdown-view">
+          {message.content || ''}
+          {message.role === 'assistant' && message.pending && Boolean(message.content) && (
+            <span className="inline-block w-2 h-4 ml-1 bg-current align-middle animate-pulse" aria-hidden="true" />
+          )}
+        </pre>
       ) : (
-        Boolean(message.content) && <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{message.content}</ReactMarkdown>
+        Boolean(message.content) && (
+          <div className="message-content-render">
+            <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{message.content}</ReactMarkdown>
+            {message.role === 'assistant' && message.pending && (
+              <span className="inline-block w-2 h-4 ml-1 bg-current align-middle animate-pulse" aria-hidden="true" />
+            )}
+          </div>
+        )
       )}
       {message.error && <div className="message-error" role="alert"><span>{message.error}</span><Button onClick={() => onRetry(message)}><RotateCcw size={13} /> Retry</Button></div>}
       {message.artifacts?.map((artifact) => <ArtifactCard artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} key={artifact.id} />)}

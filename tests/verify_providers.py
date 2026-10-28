@@ -246,9 +246,11 @@ async def test_unified_prompt_caching():
 
     # 1. Strategy Resolution Check across all ecosystem endpoints
     assert resolve_cache_strategy(adapter="gemini") == CacheStrategy.EXPLICIT_GENAI
+    assert resolve_cache_strategy(adapter="anthropic") == CacheStrategy.EXPLICIT_CACHE_CONTROL
     assert resolve_cache_strategy(adapter="openai", base_url="https://api.anthropic.com/v1") == CacheStrategy.EXPLICIT_CACHE_CONTROL
     assert resolve_cache_strategy(adapter="openai", base_url="https://openrouter.ai/api/v1", model="anthropic/claude-3.5-sonnet") == CacheStrategy.EXPLICIT_CACHE_CONTROL
-    assert resolve_cache_strategy(adapter="openai", base_url="https://openrouter.ai/api/v1", model="deepseek/deepseek-r1") == CacheStrategy.EXPLICIT_CACHE_CONTROL
+    assert resolve_cache_strategy(adapter="openai", base_url="https://openrouter.ai/api/v1", model="deepseek/deepseek-r1") == CacheStrategy.AUTOMATIC_PREFIX
+    assert resolve_cache_strategy(adapter="openai", base_url="https://openrouter.ai/api/v1", model="qwen/qwen-2.5-72b-instruct") == CacheStrategy.EXPLICIT_CACHE_CONTROL
     assert resolve_cache_strategy(adapter="openai", base_url="https://api.openai.com/v1", model="gpt-4o") == CacheStrategy.AUTOMATIC_PREFIX
     assert resolve_cache_strategy(adapter="openai", base_url="https://api.deepseek.com/v1", model="deepseek-chat") == CacheStrategy.AUTOMATIC_PREFIX
     assert resolve_cache_strategy(adapter="openai", base_url="https://api.groq.com/openai/v1", model="llama-3.3-70b-versatile") == CacheStrategy.AUTOMATIC_PREFIX

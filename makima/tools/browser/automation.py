@@ -450,6 +450,18 @@ class BrowserController:
 
             await asyncio.sleep(1.0)
 
+            # Auto-detect newly opened popup tabs or pages (e.g. window.open or target='_blank')
+            if self._context and self._context.pages:
+                open_pages = [p for p in self._context.pages if not p.is_closed()]
+                if open_pages and open_pages[-1] != self._page:
+                    logger.info("Switched to newly opened tab after click: %s", open_pages[-1].url)
+                    self._page = open_pages[-1]
+                    page = self._page
+                    try:
+                        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
+
             # Re-fetch new page state
             new_title = await page.title()
             new_url = page.url
@@ -507,6 +519,17 @@ class BrowserController:
                 }
 
             target = self._indexed_elements[index]
+            tag = (target.get("tag") or "").lower()
+            if tag in ("a", "button"):
+                return {
+                    "success": False,
+                    "error": (
+                        f"Mark index [{index}] is a <{tag}> element ('{target.get('label')}'), NOT a text input field! "
+                        f"You cannot type into a {tag}. If you want to click or navigate this element (e.g. 'Visit Homepage'), "
+                        f"call browser_interact(action='click', index={index}) instead. To search, locate an <input> element."
+                    ),
+                }
+
             center = target.get("center", [0, 0])
             # Click to focus
             await page.mouse.click(center[0], center[1])
@@ -896,12 +919,34 @@ async def close_browser_controller() -> None:
 @tool(
     name="browser_interact",
     description=(
-        "Interactive GUI Chromium browser controller using Playwright. "
-        "Use when you need to visibly open a browser window on screen, interact with e-commerce sites "
-        "(Amazon/Flipkart live price verification when HTTP fetch_page is blocked, opening product pages, clicking 'Add to Cart'), "
-        "click buttons, type into forms, or interact with web apps (Spotify, YouTube, WhatsApp)."
+        "Visible interactive browser controller for website navigation and browser-based interactions. "
+        "Use when a task requires opening a page, inspecting its content, searching within a website, "
+        "clicking links or controls, completing forms, interacting with web apps, or carrying out a sequence "
+        "of page actions. Choose this tool when the intended target is a website/browser rather than a native "
+        "application, operating-system setting, or media-session control."
     ),
     tags=["web", "browser", "automation", "interactive", "sota"],
+    purpose="Operate the active browser and interact with websites.",
+    capabilities=[
+        "Navigate to a URL and inspect the current page.",
+        "Read interactive elements and visible page content.",
+        "Click controls, follow links, enter text, and submit forms.",
+    ],
+    use_when=[
+        "The intended target is a web page, website, or browser tab.",
+        "The task requires visible browser interaction or a multi-step website workflow.",
+    ],
+    avoid_when=[
+        "The requested target is a native desktop application's process lifecycle.",
+        "The user wants to change the system's active Windows media session without interacting with a website.",
+        "The requested operation can be completed through a more direct native application-control tool.",
+    ],
+    examples=[
+        "Open a website and search within it.",
+        "Interact with a form on the current page.",
+        "Navigate to a page and verify what is displayed.",
+    ],
+    side_effect="Navigates and interacts with the current browser session; it does not terminate native applications.",
 )
 async def browser_interact(
     action: str,
@@ -916,7 +961,9 @@ async def browser_interact(
     max_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Executes an action in the persistent Playwright Chromium browser.
+    Executes an action in the persistent Playwright Chromium browser. Read the current page state and each
+    action result before deciding on the next step. A successful navigation means the page opened; it does
+    not by itself prove that a specific task on the page has completed.
 
     Args:
         action: The action to execute. Must be one of:

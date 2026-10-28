@@ -78,7 +78,12 @@ def _extract_text_from_html(html_content: str, max_length: int = 20000) -> tuple
 
 @tool(
     name="fetch_web_page",
-    description="Fetches web page using async httpx client with realistic User-Agent. Cleans HTML tags, returns title, status_code, and clean text content.",
+    description=(
+        "Use when you need to read the text content of a URL. "
+        "Prefer web_search + fetch_page (from web_search tools) over this — "
+        "they use a shared connection pool and are faster. "
+        "Use this as a fallback when those are unavailable."
+    ),
     tags=["web", "browser", "fetch"],
 )
 async def fetch_web_page(
@@ -184,7 +189,11 @@ def _unwrap_ddg_url(raw_url: str) -> str:
 
 @tool(
     name="search_web",
-    description="Performs web search (using DuckDuckGo HTML / free search endpoint via httpx) and returns list of results (title, snippet, url).",
+    description=(
+        "Use when you need to search the web. "
+        "Prefer web_search (from web_search tools) over this — it uses Tavily which "
+        "gives better results. Use this only as a fallback when web_search is unavailable."
+    ),
     tags=["web", "browser", "search"],
 )
 async def search_web(

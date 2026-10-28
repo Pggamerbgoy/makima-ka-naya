@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 
 @tool(
     name="get_system_stats",
-    description="Retrieve live hardware and operating system telemetry: CPU, RAM, Disk, and Battery stats via psutil.",
+    description=(
+        "Use when you need to check current hardware status — CPU or RAM usage, "
+        "available disk space, battery level, or OS details. "
+        "Good for diagnosing performance issues, checking free space before large operations, "
+        "or answering questions like 'how much RAM is free' or 'is my battery low'."
+    ),
     tags=["os", "hardware", "telemetry", "system"],
 )
 def get_system_stats() -> Dict[str, Any]:

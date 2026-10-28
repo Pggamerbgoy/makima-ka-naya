@@ -79,8 +79,26 @@ def _resolve_application_target(app_name: str, match_closest: bool = True) -> Op
 
 @tool(
     name="launch_application",
-    description="Launch a desktop application or registered URI protocol (e.g. 'notepad', 'calculator', 'calc:', 'spotify:') using AppOpener with os.startfile fallback.",
+    description="Launch a desktop application or registered URI protocol.",
     tags=["os", "apps", "execution"],
+    purpose="Start a named desktop application or registered URI protocol.",
+    capabilities=[
+        "Resolve and launch an application by name.",
+        "Resolve a registered protocol URI and open its associated application.",
+        "Perform a dry-run resolution without launching the target.",
+    ],
+    use_when=[
+        "The intended target is a desktop application that should be opened or launched.",
+    ],
+    avoid_when=[
+        "The user intends to close an application that is already running.",
+        "The user intends only to change playback state or interact with a website.",
+    ],
+    examples=[
+        "Open the calculator application.",
+        "Launch a named desktop application.",
+    ],
+    side_effect="Launches an application or opens a registered protocol.",
 )
 def launch_application(
     app_name: str,
@@ -229,8 +247,27 @@ def launch_application(
 
 @tool(
     name="terminate_application",
-    description="Terminate or close an active application by name using AppOpener.",
+    description="Close a running desktop application by application name.",
     tags=["os", "apps", "control"],
+    purpose="Request closure of a named application rather than modifying media playback.",
+    capabilities=[
+        "Find a running application by its user-visible name and request that it close.",
+        "Report whether the target application was found and whether closure was accepted.",
+    ],
+    use_when=[
+        "The requested target is a desktop application the user wants to close or exit.",
+        "The user wants an application closed while another independent activity should continue.",
+    ],
+    avoid_when=[
+        "The user asks only to pause, stop, or resume audio/video playback.",
+        "The user asks to close a browser tab or navigate away from a web page but keep the browser open.",
+        "The user asks to shut down or reboot the whole operating system.",
+    ],
+    examples=[
+        "Close a named desktop application.",
+        "Close one application while leaving other running applications untouched.",
+    ],
+    side_effect="Requests application closure; unsaved work in the target application may be affected.",
 )
 def terminate_application(
     app_name: str,

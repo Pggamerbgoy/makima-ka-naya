@@ -6,7 +6,9 @@ Zero-Hardcoding Guarantee: Fully dynamic bridge endpoint and pairing security en
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from collections import deque
 import logging
 import os
 import re
@@ -63,7 +65,7 @@ class WhatsAppAdapter(BaseAdapter):
         self.api_key = api_key or os.getenv("WHATSAPP_API_KEY", "")
         self.webhook_secret = webhook_secret or os.getenv("WHATSAPP_WEBHOOK_SECRET", "")
         self._custom_client = http_client
-        self._sent_messages_log: List[Dict[str, Any]] = []
+        self._sent_messages_log: deque[Dict[str, Any]] = deque(maxlen=200)
 
     @property
     def name(self) -> str:
@@ -255,7 +257,7 @@ class WhatsAppAdapter(BaseAdapter):
         if not p.is_file():
             raise FileNotFoundError(f"File to send does not exist: {file_path}")
 
-        file_bytes = p.read_bytes()
+        file_bytes = await asyncio.to_thread(p.read_bytes)
         b64_content = base64.b64encode(file_bytes).decode("ascii")
 
         record = {

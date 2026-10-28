@@ -49,13 +49,25 @@ def build_engine(
 async def load_session_messages(
     engine: HermesAgentEngine,
     session_id: Optional[str],
-    limit: int = 100,
+    limit: Optional[int] = None,
+    max_tokens: Optional[int] = None,
+    current_prompt: Optional[str] = None,
 ) -> List[Any]:
-    """Load bounded episodic history for a session, degrading safely if unavailable."""
+    """Load model-aware episodic history for a session, bounded by dynamic token budget."""
     if not session_id or engine.episodic_memory is None:
         return []
     try:
-        return await engine.episodic_memory.get_recent_messages(session_id, limit=limit)
+        eff_tokens = max_tokens
+        if eff_tokens is None and limit is None and hasattr(engine, "_calculate_history_token_budget"):
+            eff_tokens = engine._calculate_history_token_budget(
+                system_prompt=getattr(engine, "DEFAULT_SYSTEM_PROMPT", ""),
+                current_prompt=current_prompt,
+            )
+        return await engine.episodic_memory.get_recent_messages(
+            session_id,
+            limit=limit,
+            max_tokens=eff_tokens,
+        )
     except Exception as exc:
         logger.debug("Session history unavailable for %s: %s", session_id, exc)
         return []

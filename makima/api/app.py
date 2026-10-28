@@ -33,7 +33,7 @@ from makima.core.engine import HermesAgentEngine
 from makima.provider.adapters.base import Message
 from makima.provider.cache import get_cache_manager
 from makima.provider.router import ParetoRouter
-from makima.runtime import build_engine, build_plugin_manager, build_registry
+from makima.runtime import build_engine, build_plugin_manager, build_registry, load_session_messages
 from makima.tools.registry import ToolRegistry, get_registry
 from makima.plugins import PluginManifest
 from makima.voice.gemini_live import DEFAULT_LIVE_MODEL
@@ -1043,7 +1043,7 @@ def create_app(
         elif body.session_id:
             if eng and eng.episodic_memory is not None:
                 try:
-                    episodic_msgs = await eng.episodic_memory.get_recent_messages(body.session_id, limit=100)
+                    episodic_msgs = await load_session_messages(eng, body.session_id)
                     if episodic_msgs:
                         parsed_messages = episodic_msgs
                 except Exception as exc:

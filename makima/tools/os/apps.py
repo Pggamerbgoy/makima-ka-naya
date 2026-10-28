@@ -61,7 +61,12 @@ def _resolve_executable_path(app_name: str) -> Optional[str]:
 
 @tool(
     name="launch_app",
-    description="Launch an application or executable process safely using subprocess.Popen.",
+    description=(
+        "Use when you need to open an application or program by name or path "
+        "(e.g. 'notepad', 'calc', 'brave', 'code'). "
+        "To open a URL in a browser, use play_song or browser_interact instead. "
+        "To run a shell command or script, use execute_command instead."
+    ),
     tags=["os", "apps", "execution"],
 )
 def launch_app(

@@ -1,4 +1,4 @@
-export type ArtifactKind = 'markdown' | 'image' | 'video' | 'audio' | 'chart' | 'diagram' | 'table' | 'code' | 'html' | 'document' | 'diff' | 'log' | 'json';
+export type ArtifactKind = 'markdown' | 'image' | 'video' | 'audio' | 'chart' | 'diagram' | 'table' | 'code' | 'html' | 'document' | 'diff' | 'log' | 'json' | 'pdf';
 
 export type Artifact = {
   id: string;
@@ -20,7 +20,8 @@ export type ExecutionStep = {
   stage?: string;
   arguments?: Record<string, unknown> | string;
   result?: unknown;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'awaiting_approval';
+  permission_id?: string;
   error?: string;
   timestamp?: number;
   duration_ms?: number;

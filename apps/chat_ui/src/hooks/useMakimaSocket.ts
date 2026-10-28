@@ -58,6 +58,7 @@ export function useMakimaSocket({ configuredUrl, onEvent, onNotice }: Options) {
         const event = JSON.parse(String(message.data)) as StreamEvent;
         const taskId = String(event.task_id ?? '');
         if (event.type === 'status' && taskId === activeTaskRef.current) setTaskStage(String(event.stage ?? 'working'));
+        if (event.type === 'chunk') setTaskStage('streaming');
         if (event.type === 'message' && taskId === activeTaskRef.current) { setTaskState('completed'); setActiveTaskId(null); }
         if (event.type === 'error' && taskId === activeTaskRef.current) { setTaskState('error'); setActiveTaskId(null); }
         if (event.type === 'task_cancelled' && taskId === activeTaskRef.current) { setTaskState('cancelled'); setActiveTaskId(null); }

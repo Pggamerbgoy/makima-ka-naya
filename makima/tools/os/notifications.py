@@ -47,7 +47,12 @@ win11toast.speak = _patched_speak
 
 @tool(
     name="show_desktop_notification",
-    description="Display a native Windows 10/11 Action Center desktop toast alert using win11toast without PowerShell overhead.",
+    description=(
+        "Use when you want to alert the user with a Windows toast notification — "
+        "task completion, reminders, errors, or status updates. "
+        "Shows in the Action Center without interrupting the active window. "
+        "For spoken alerts, pass dialogue text."
+    ),
     tags=["os", "desktop", "notifications"],
 )
 def show_desktop_notification(

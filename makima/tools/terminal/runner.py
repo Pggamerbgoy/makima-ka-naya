@@ -313,8 +313,11 @@ def _try_windows_shell_start(command: str, cwd: Path) -> Optional[Dict[str, Any]
 @tool(
     name="execute_command",
     description=(
-        "Executes a shell command asynchronously in a sandboxed, directory-clamped environment "
-        "with strict timeout enforcement, safety guardrail validation, and output truncation."
+        "Use when you need to run a shell command, terminal program, or script. "
+        "Good for git, pip, python scripts, file operations via CLI, and anything "
+        "that belongs in a terminal. "
+        "To open a GUI application, use launch_app instead. "
+        "To interact with a website, use browser_interact instead."
     ),
     tags=["terminal", "system", "sandbox"],
 )
@@ -403,6 +406,10 @@ async def execute_command(
             proc.communicate(),
             timeout=float(timeout_seconds),
         )
+    except asyncio.CancelledError:
+        logger.info("Command '%s' cancelled by client. Terminating process tree.", command)
+        await _kill_process_tree(proc)
+        raise
     except asyncio.TimeoutError:
         logger.warning("Command '%s' timed out after %s seconds. Terminating process tree.", command, timeout_seconds)
         await _kill_process_tree(proc)

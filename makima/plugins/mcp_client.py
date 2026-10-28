@@ -123,7 +123,11 @@ class MCPManager:
             for remote_tool in listed.tools:
                 clean_tool_name = re.sub(r"[^a-zA-Z0-9_]+", "_", remote_tool.name).strip("_")
                 name = f"mcp_{clean_prefix}_{clean_tool_name}"
-                schema = getattr(remote_tool, "inputSchema", None) or {"type": "object", "properties": {}}
+                raw_schema = getattr(remote_tool, "inputSchema", None) or {"type": "object", "properties": {}}
+                if isinstance(raw_schema, dict):
+                    schema = {k: v for k, v in raw_schema.items() if not str(k).startswith("$")}
+                else:
+                    schema = raw_schema
                 registry.register_tool(Tool(
                     name=name,
                     description=str(getattr(remote_tool, "description", "") or remote_tool.name),

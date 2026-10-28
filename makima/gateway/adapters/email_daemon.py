@@ -433,7 +433,7 @@ class EmailAdapter(BaseAdapter):
         msg.attach(MIMEText(body_text, "plain", "utf-8"))
 
         # Attachment
-        file_bytes = p.read_bytes()
+        file_bytes = await asyncio.to_thread(p.read_bytes)
         part = MIMEApplication(file_bytes, Name=p.name)
         part["Content-Disposition"] = f'attachment; filename="{p.name}"'
         msg.attach(part)
