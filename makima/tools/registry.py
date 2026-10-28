@@ -373,6 +373,7 @@ class Tool:
     avoid_when: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
     side_effect: str = ""
+    fallback_for: Optional[str] = None
 
     @property
     def selection_guidance(self) -> str:
@@ -395,6 +396,11 @@ class Tool:
     def model_description(self) -> str:
         """Complete description shown to the LLM without changing the canonical base description."""
         guidance = self.selection_guidance
+        if self.fallback_for:
+            fallback_guidance = (
+                f"Fallback tool for '{self.fallback_for}'. Use only when that primary tool is unavailable."
+            )
+            guidance = f"{guidance}\n{fallback_guidance}" if guidance else fallback_guidance
         if not guidance:
             return self.description
         return f"{self.description}\n\n{guidance}"
@@ -415,6 +421,7 @@ class Tool:
         avoid_when: Optional[List[str]] = None,
         examples: Optional[List[str]] = None,
         side_effect: Optional[str] = None,
+        fallback_for: Optional[str] = None,
     ) -> "Tool":
         """Builds a Tool instance by introspecting a function."""
         tool_name = name or getattr(fn, "__name__", "unnamed_tool")
@@ -451,6 +458,7 @@ class Tool:
             avoid_when=list(avoid_when or []),
             examples=list(examples or []),
             side_effect=side_effect or "",
+            fallback_for=fallback_for,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -544,6 +552,7 @@ class ToolRegistry:
         avoid_when: Optional[List[str]] = None,
         examples: Optional[List[str]] = None,
         side_effect: Optional[str] = None,
+        fallback_for: Optional[str] = None,
     ) -> Tool:
         """
         Registers a function or Tool object into this registry.
@@ -568,6 +577,7 @@ class ToolRegistry:
             avoid_when=avoid_when,
             examples=examples,
             side_effect=side_effect,
+            fallback_for=fallback_for,
         )
         return self.register_tool(tool_obj)
 
@@ -633,7 +643,12 @@ class ToolRegistry:
     ) -> List[Dict[str, Any]]:
         """Returns schemas for all registered tools formatted for target LLM provider."""
         tools = self.list_tools(tags=tags)
-        return [t.to_schema(format=format) for t in tools]
+        active_names = {tool.name for tool in tools}
+        return [
+            tool.to_schema(format=format)
+            for tool in tools
+            if not tool.fallback_for or tool.fallback_for not in active_names
+        ]
 
     def tool(
         self,
@@ -647,6 +662,7 @@ class ToolRegistry:
         avoid_when: Optional[List[str]] = None,
         examples: Optional[List[str]] = None,
         side_effect: Optional[str] = None,
+        fallback_for: Optional[str] = None,
     ) -> Callable:
         """Decorator to register a tool directly on this registry instance."""
         def decorator(fn: Callable) -> Callable:
@@ -664,6 +680,7 @@ class ToolRegistry:
                 avoid_when=avoid_when,
                 examples=examples,
                 side_effect=side_effect,
+                fallback_for=fallback_for,
             )
             setattr(fn, "__makima_tool__", True)
             setattr(fn, "__tool_name__", tool_obj.name)
@@ -962,6 +979,7 @@ def tool(
     avoid_when: Optional[List[str]] = None,
     examples: Optional[List[str]] = None,
     side_effect: Optional[str] = None,
+    fallback_for: Optional[str] = None,
 ) -> Callable:
     """
     Primary @tool decorator.
@@ -989,6 +1007,7 @@ def tool(
             avoid_when=avoid_when,
             examples=examples,
             side_effect=side_effect,
+            fallback_for=fallback_for,
         )
 
         setattr(fn, "__makima_tool__", True)
