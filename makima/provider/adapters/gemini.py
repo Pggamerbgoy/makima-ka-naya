@@ -421,7 +421,7 @@ class GeminiProvider(BaseProvider):
             err_msg = str(exc)
             err_lower = err_msg.lower()
             self._last_cache_fallback_reason = err_msg
-            if any(w in err_lower for w in ("minimum", "token", "insufficient", "32768", "not supported", "unsupported")):
+            if any(w in err_lower for w in ("minimum", "token", "insufficient", "32768", "too small", "min_total", "freetier", "limit=0", "resource_exhausted", "quota", "not supported", "unsupported")):
                 self._context_cache_supported = False
                 logger.warning(
                     "Disabling Gemini KV Context Caching for model %s due to threshold/support error: %s",
