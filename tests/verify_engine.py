@@ -281,6 +281,7 @@ async def test_engine_multi_turn_while_loop():
 
     result = await engine.run(
         prompt="What is 42 multiplied by 1337?",
+        tools=[{"name": "calculator", "description": "Multiply two numbers."}],
         tool_executor=mock_calculator,
     )
 
@@ -339,6 +340,7 @@ async def test_engine_guardrail_interception():
 
     result = await engine.run(
         prompt="Clean up all root files.",
+        tools=[{"name": "run_command", "description": "Execute a command after guardrail validation."}],
         tool_executor=mock_executor,
     )
 
@@ -381,6 +383,7 @@ async def test_engine_max_turns_guard():
 
     result = await engine.run(
         prompt="Start an infinite ping loop.",
+        tools=[{"name": "ping", "description": "Mock diagnostic ping tool."}],
         tool_executor=mock_ping,
     )
 
@@ -432,6 +435,10 @@ async def test_engine_with_compression_during_run():
 
     result = await engine.run(
         prompt="Analyze the big dataset.",
+        tools=[
+            {"name": "read_data", "description": "Read source data."},
+            {"name": "process_data", "description": "Process the returned data."},
+        ],
         tool_executor=mock_data_tool,
     )
 
