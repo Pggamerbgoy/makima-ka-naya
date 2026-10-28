@@ -358,9 +358,10 @@ class ParetoRouter:
 
             try:
                 start_time = time.monotonic()
-                if on_chunk and not tools and hasattr(provider, "stream"):
+                if on_chunk and hasattr(provider, "stream"):
                     try:
-                        accumulated_parts = []
+                        accumulated_parts: List[str] = []
+                        accumulated_tool_calls: List[ToolCall] = []
                         last_finish = "stop"
                         async for chunk in provider.stream(
                             messages=resumed_messages,
@@ -375,6 +376,8 @@ class ParetoRouter:
                                 cb = on_chunk(chunk.delta)
                                 if inspect.isawaitable(cb):
                                     await cb
+                            if chunk.tool_calls:
+                                accumulated_tool_calls.extend(chunk.tool_calls)
                             if chunk.finish_reason:
                                 last_finish = chunk.finish_reason
                         elapsed_ms = (time.monotonic() - start_time) * 1000.0
@@ -383,10 +386,11 @@ class ParetoRouter:
                         continuation_text = "".join(accumulated_parts)
                         full_content = prefix_text + continuation_text
                         return ProviderResponse(
-                            content=full_content,
-                            tool_calls=[],
-                            finish_reason=last_finish,
+                            content=full_content or None,
+                            tool_calls=accumulated_tool_calls,
+                            finish_reason="tool_calls" if accumulated_tool_calls else last_finish,
                             model=getattr(provider.config, "model", backend_name),
+                            latency_ms=elapsed_ms,
                         )
                     except NotImplementedError:
                         pass
