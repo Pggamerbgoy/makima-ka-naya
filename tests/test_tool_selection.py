@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
+from types import ModuleType, SimpleNamespace
 from typing import Any, Iterable, List
 
 import pytest
 
 from makima.core.engine import HermesAgentEngine
-from makima.provider.adapters.base import ToolCall
-from makima.tools.registry import ToolRegistry
+from makima.provider.adapters.base import ProviderResponse, ToolCall
+from makima.tools.registry import Tool, ToolRegistry
 from makima.tools.selection import ToolExecutionGateway, ToolSelectionService
 
 
@@ -245,3 +246,490 @@ async def test_engine_never_executes_a_tool_absent_from_current_schemas() -> Non
 
     assert result.startswith("[TOOL_NOT_AVAILABLE")
     assert called == []
+
+
+
+class QueueRouter:
+    """Small deterministic router for exercising engine wiring without a provider."""
+
+    def __init__(self, responses: list[ProviderResponse]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict[str, Any]] = []
+
+    def get_ranked_candidates(self, _task: str = "fast_chat") -> list[Any]:
+        return []
+
+    async def execute_with_fallback(self, **kwargs: Any) -> ProviderResponse:
+        self.calls.append(kwargs)
+        if not self.responses:
+            raise AssertionError("Unexpected provider call: response queue is empty")
+        return self.responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_plain_text_tool_trace_is_never_executed() -> None:
+    router = QueueRouter([
+        ProviderResponse(
+            content=(
+                "I'll check that now.\\n"
+                "[Executed Tools in Turn: browser_interact(action='navigate', url='https://example.com') -> ok]"
+            ),
+            tool_calls=[],
+            finish_reason="stop",
+            model="mock",
+        )
+    ])
+    engine = HermesAgentEngine(router=router, enable_implicit_learning=False)
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    async def executor(name: str, args: dict[str, Any]) -> dict[str, bool]:
+        executed.append((name, args))
+        return {"success": True}
+
+    result = await engine.run(
+        prompt="Open example.com",
+        tools=[schema("browser_interact", "Navigate a browser to a URL.")],
+        tool_executor=executor,
+    )
+
+    assert executed == []
+    assert result.tool_calls_executed == 0
+    assert "[Executed Tools in Turn:" not in result.content
+    assert "No action was executed" in result.content
+
+
+@pytest.mark.asyncio
+async def test_no_tools_exposed_means_structured_tool_calls_are_blocked() -> None:
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="call-1", name="unexposed_action", arguments={})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="No action was run.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(router=router, enable_implicit_learning=False)
+    executed: list[str] = []
+
+    async def executor(name: str, _args: dict[str, Any]) -> dict[str, bool]:
+        executed.append(name)
+        return {"success": True}
+
+    result = await engine.run(
+        prompt="Do something",
+        tools=None,
+        tool_executor=executor,
+    )
+
+    assert executed == []
+    assert "[TOOL_NOT_AVAILABLE: unexposed_action]" in "\\n".join(
+        message.content or "" for message in result.messages if message.role == "tool"
+    )
+
+
+@pytest.mark.asyncio
+async def test_semantic_selector_miss_expands_full_catalog_on_next_turn() -> None:
+    names = ["a_weather"] + [f"mid_tool_{i:02d}" for i in range(34)] + ["z_set_volume"]
+    schemas = [schema(name, f"Tool named {name}.") for name in names]
+
+    class NarrowSelector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def select_schemas(self, available: list[dict[str, Any]], query: str, *, tool_metadata: Any = None) -> list[dict[str, Any]]:
+            self.calls += 1
+            return [next(item for item in available if item["function"]["name"] == "a_weather")]
+
+    selector = NarrowSelector()
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="hidden-1", name="z_set_volume", arguments={"volume": 40})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(
+            content="",
+            tool_calls=[ToolCall(id="visible-2", name="z_set_volume", arguments={"volume": 40})],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="Volume set to 40.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(
+        router=router,
+        tool_selector=selector,
+        enable_implicit_learning=False,
+        max_turns=5,
+    )
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    async def executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        executed.append((name, args))
+        return {"success": True, "volume": args["volume"]}
+
+    result = await engine.run(
+        prompt="Set volume to 40",
+        tools=schemas,
+        tool_executor=executor,
+    )
+
+    assert selector.calls == 2, "Normal turns use semantic retrieval; the recovery turn alone must expose the full catalogue."
+    assert "z_set_volume" not in {
+        item["function"]["name"] for item in router.calls[0]["tools"]
+    }
+    assert "z_set_volume" in {
+        item["function"]["name"] for item in router.calls[1]["tools"]
+    }
+    assert executed == [("z_set_volume", {"volume": 40})]
+    assert result.completed is True
+
+
+@pytest.mark.asyncio
+async def test_custom_schema_set_does_not_borrow_parallel_safety_from_global_registry() -> None:
+    from makima.tools.registry import get_registry
+
+    unique_a = "parallel_probe_a_82f1"
+    unique_b = "parallel_probe_b_82f1"
+
+    async def global_read() -> dict[str, bool]:
+        return {"ok": True}
+
+    reg = get_registry()
+    reg.register(global_read, name=unique_a, parallel_safe=True)
+    reg.register(global_read, name=unique_b, parallel_safe=True)
+
+    active = 0
+    max_active = 0
+
+    async def custom_executor(name: str, _args: dict[str, Any]) -> dict[str, bool]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return {"tool": name}
+
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id="parallel-a", name=unique_a, arguments={}),
+                ToolCall(id="parallel-b", name=unique_b, arguments={}),
+            ],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="Done.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(router=router, enable_implicit_learning=False)
+    await engine.run(
+        prompt="Run the two custom actions",
+        tools=[schema(unique_a, "Custom action A."), schema(unique_b, "Custom action B.")],
+        tool_executor=custom_executor,
+    )
+
+    assert max_active == 1, "A raw schema list has no safety metadata; calls must be serialized."
+
+
+
+@pytest.mark.asyncio
+async def test_gemini_live_uses_injected_gateway_for_voice_tool_execution(monkeypatch: Any) -> None:
+    from makima.voice import gemini_live
+
+    registry = ToolRegistry(name="voice-gateway-test")
+    executions: list[str] = []
+
+    async def dangerous_action(target: str) -> dict[str, bool]:
+        executions.append(target)
+        return {"success": True}
+
+    registry.register(
+        dangerous_action,
+        name="voice_test_action",
+        description="Test-only side effect.",
+        tags=["control"],
+    )
+    disabled = {"voice_test_action"}
+    gateway = ToolExecutionGateway(registry, lambda: disabled)
+
+    class FakeLiveSocket:
+        def __init__(self) -> None:
+            self.sent: list[Any] = []
+
+        async def receive(self):
+            yield SimpleNamespace(
+                server_content=None,
+                tool_call=SimpleNamespace(
+                    function_calls=[
+                        SimpleNamespace(
+                            name="voice_test_action",
+                            args={"target": "must-not-run"},
+                            id="voice-call-1",
+                        )
+                    ]
+                ),
+            )
+
+        async def send(self, *, input: Any) -> None:
+            self.sent.append(input)
+
+    class FakeFunctionResponse:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    class FakeToolResponse:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(gemini_live.types, "FunctionResponse", FakeFunctionResponse)
+    monkeypatch.setattr(gemini_live.types, "LiveClientToolResponse", FakeToolResponse)
+
+    session = gemini_live.GeminiLiveSession(execution_gateway=gateway)
+    session._session = FakeLiveSocket()
+    session._is_active = True
+    session._available_tool_names = {"voice_test_action"}
+
+    events = [event async for event in session.receive_events()]
+
+    assert executions == [], "Disabled voice tools must not run through a direct registry bypass."
+    tool_result = next(event for event in events if event["type"] == "tool_result")
+    assert "[TOOL_DISABLED: voice_test_action]" in str(tool_result["result"])
+    assert session._session.sent, "The gateway result must be returned to Gemini as a function response."
+
+
+
+@pytest.mark.asyncio
+async def test_explicit_registry_reload_replaces_stale_tool_implementation() -> None:
+    registry = ToolRegistry(name="reload-test")
+
+    def old_implementation() -> str:
+        return "old"
+
+    registry.register(old_implementation, name="reloadable_action")
+    module = ModuleType("test_dynamic_plugin_module")
+
+    def new_implementation() -> str:
+        return "new"
+
+    new_tool = Tool.from_function(new_implementation, name="reloadable_action")
+    setattr(new_implementation, "__makima_tool__", True)
+    setattr(new_implementation, "__tool_obj__", new_tool)
+    setattr(module, "reloadable_action", new_implementation)
+
+    registry.discover(package=module, reload=True)
+
+    assert registry["reloadable_action"].fn is new_implementation
+    assert await registry.execute("reloadable_action", {}) == "new"
+
+    # Removed tool declarations must not survive an explicit package reload.
+    delattr(module, "reloadable_action")
+    registry.discover(package=module, reload=True)
+    assert not registry.has("reloadable_action")
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled", "limit"),
+    [(False, 8), (True, 1)],
+)
+async def test_configured_tool_concurrency_is_honored(
+    monkeypatch: Any,
+    enabled: bool,
+    limit: int,
+) -> None:
+    import makima.config as config_module
+
+    selection = SimpleNamespace(
+        enabled=False,
+        embedding_model="test",
+        max_candidates=96,
+        minimum_candidates=24,
+        minimum_similarity=0.2,
+    )
+    concurrency = SimpleNamespace(
+        enabled=enabled,
+        max_concurrency=limit,
+        parallel_safe_tags=["search"],
+        mutating_tags=["write"],
+    )
+    fake_settings = SimpleNamespace(
+        tools=SimpleNamespace(selection=selection, concurrency=concurrency),
+        tool_timeout=2.0,
+        max_tool_output_chars=16000,
+    )
+    monkeypatch.setattr(config_module, "get_settings", lambda: fake_settings)
+
+    registry = ToolRegistry(name=f"concurrency-{enabled}-{limit}")
+    active = 0
+    max_active = 0
+
+    async def harmless_read() -> dict[str, bool]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return {"ok": True}
+
+    first_name = f"concurrency_tool_a_{enabled}_{limit}"
+    second_name = f"concurrency_tool_b_{enabled}_{limit}"
+    registry.register(harmless_read, name=first_name, parallel_safe=True, tags=["search"])
+    registry.register(harmless_read, name=second_name, parallel_safe=True, tags=["search"])
+
+    router = QueueRouter([
+        ProviderResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id="parallel-a", name=first_name, arguments={}),
+                ToolCall(id="parallel-b", name=second_name, arguments={}),
+            ],
+            finish_reason="tool_calls",
+            model="mock",
+        ),
+        ProviderResponse(content="Done.", finish_reason="stop", model="mock"),
+    ])
+    engine = HermesAgentEngine(
+        router=router,
+        tool_selector=ToolSelectionService(selection, embedding_factory=lambda _model: DirectionalEmbedding()),
+        enable_implicit_learning=False,
+    )
+
+    result = await engine.run(prompt="Check both harmless states", tools=registry)
+
+    assert result.completed is True
+    assert max_active <= limit if enabled else max_active == 1
+
+
+
+def test_gemini_live_is_reserved_for_voice_routing() -> None:
+    from makima.config import get_settings
+
+    settings = get_settings()
+    for task_name in ("fast_chat", "code", "deep_reasoning", "vision"):
+        assert "gemini_live" not in settings.providers.cascades[task_name]
+        assert "gemini_3_8_live" not in settings.providers.cascades[task_name]
+
+    assert settings.providers.cascades["voice"] == ["gemini_live"]
+    assert "gemini_3_8_live" not in settings.providers.backends
+
+
+
+@pytest.mark.asyncio
+async def test_fallback_tool_schema_is_hidden_only_when_primary_is_available() -> None:
+    registry = ToolRegistry(name="fallback-selection-test")
+
+    def primary_lookup(query: str) -> dict[str, str]:
+        return {"source": "primary", "query": query}
+
+    def fallback_lookup(query: str) -> dict[str, str]:
+        return {"source": "fallback", "query": query}
+
+    registry.register(primary_lookup, name="primary_lookup", tags=["search"])
+    registry.register(
+        fallback_lookup,
+        name="fallback_lookup",
+        tags=["search"],
+        fallback_for="primary_lookup",
+    )
+
+    schemas = registry.get_schemas()
+    assert [item["function"]["name"] for item in schemas] == ["primary_lookup"]
+    assert await registry.execute("fallback_lookup", {"query": "still callable"}) == {
+        "source": "fallback",
+        "query": "still callable",
+    }
+
+    disabled_primary_gateway = ToolExecutionGateway(
+        registry,
+        disabled_tools={"primary_lookup"},
+    )
+    fallback_schemas = disabled_primary_gateway.get_schemas()
+    assert [item["function"]["name"] for item in fallback_schemas] == ["fallback_lookup"]
+
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_stream_preserves_fragmented_tool_calls(monkeypatch: Any) -> None:
+    from makima.provider.adapters.openai_compatible import OpenAICompatibleProvider
+
+    class AsyncChunks:
+        def __init__(self, chunks: list[Any]) -> None:
+            self.chunks = chunks
+
+        def __aiter__(self):
+            self._iterator = iter(self.chunks)
+            return self
+
+        async def __anext__(self) -> Any:
+            try:
+                return next(self._iterator)
+            except StopIteration:
+                raise StopAsyncIteration
+
+    first_delta = SimpleNamespace(
+        content="Checking now.",
+        tool_calls=[
+            SimpleNamespace(
+                index=0,
+                id="call-stream-1",
+                function=SimpleNamespace(name="set_volume", arguments='{"percent":'),
+            )
+        ],
+    )
+    second_delta = SimpleNamespace(
+        content=None,
+        tool_calls=[
+            SimpleNamespace(
+                index=0,
+                id=None,
+                function=SimpleNamespace(name=None, arguments="50}"),
+            )
+        ],
+    )
+    end_delta = SimpleNamespace(content=None, tool_calls=None)
+    chunks_in = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=first_delta, finish_reason=None)]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=second_delta, finish_reason=None)]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=end_delta, finish_reason="tool_calls")]),
+    ]
+
+    class FakeCompletions:
+        async def create(self, **_kwargs: Any) -> AsyncChunks:
+            return AsyncChunks(chunks_in)
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.config = SimpleNamespace(model="mock-model", base_url="https://api.openai.com/v1")
+    provider.cache_manager = SimpleNamespace(
+        extract_cached_tokens=lambda _usage: 0,
+        record_usage=lambda **_kwargs: None,
+    )
+    provider.cache_strategy = "none"
+
+    async def noop() -> None:
+        return None
+
+    monkeypatch.setattr(provider, "_before_call", noop)
+    monkeypatch.setattr(provider, "_on_success", noop)
+    monkeypatch.setattr(provider, "_on_failure", lambda _exc: noop())
+    monkeypatch.setattr(provider, "_get_client", lambda: fake_client)
+    monkeypatch.setattr(provider, "_format_messages", lambda messages, system_prompt=None: [])
+    monkeypatch.setattr(provider, "_format_tools", lambda tools: tools)
+
+    streamed = [
+        chunk
+        async for chunk in provider.stream(
+            messages=[],
+            tools=[schema("set_volume", "Set master output volume.")],
+        )
+    ]
+
+    assert "".join(chunk.delta for chunk in streamed) == "Checking now."
+    calls = [call for chunk in streamed for call in (chunk.tool_calls or [])]
+    assert len(calls) == 1
+    assert calls[0].id == "call-stream-1"
+    assert calls[0].name == "set_volume"
+    assert calls[0].arguments == {"percent": 50}
