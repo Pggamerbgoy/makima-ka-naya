@@ -383,3 +383,162 @@ def maximize_window(
                 "title": title,
                 "error": f"Failed to maximize window: {exc}",
             }
+
+
+def _get_work_area() -> Tuple[int, int, int, int]:
+    """Returns (left, top, width, height) of usable desktop screen excluding taskbar."""
+    if hasattr(ctypes, "windll"):
+        try:
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
+            rc = RECT()
+            # SPI_GETWORKAREA = 0x0030
+            if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rc), 0):
+                return rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top
+        except Exception:
+            pass
+    try:
+        w = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+        h = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+        return 0, 0, w, h
+    except Exception:
+        return 0, 0, 1920, 1080
+
+
+@tool(
+    name="snap_window",
+    description=(
+        "Position, resize, or snap a desktop window to a layout on the physical screen. "
+        "Supported positions: 'left' (left half 50%), 'right' (right half 50%), 'top' (top half), 'bottom' (bottom half), "
+        "'top_left', 'top_right', 'bottom_left', 'bottom_right' (quadrants), 'center' (centered 70%), "
+        "or custom pixel coordinates (x, y, width, height)."
+    ),
+    tags=["os", "windows", "gui", "layout"],
+)
+def snap_window(
+    title_query: Optional[str] = None,
+    hwnd: Optional[int] = None,
+    position: str = "left",
+    x: Optional[int] = None,
+    y: Optional[int] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Snap or move a window to a layout preset or exact screen coordinates.
+
+    Args:
+        title_query: Substring or title of the window to snap.
+        hwnd: Specific window HWND.
+        position: Layout preset ('left', 'right', 'top', 'bottom', 'top_left', 'top_right', 'bottom_left', 'bottom_right', 'center', 'custom').
+        x: Optional custom left pixel offset.
+        y: Optional custom top pixel offset.
+        width: Optional custom width in pixels.
+        height: Optional custom height in pixels.
+
+    Returns:
+        Dict reporting success, window title, HWND, and new window bounds.
+    """
+    with _open_interactive_desktop():
+        target_hwnd, title, err = _find_target_window(title_query=title_query, hwnd=hwnd)
+        if target_hwnd is None or err:
+            return {"success": False, "error": err}
+
+        try:
+            # Restore window if minimized or maximized
+            if win32gui.IsIconic(target_hwnd) or win32gui.IsZoomed(target_hwnd):
+                win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+
+            work_x, work_y, work_w, work_h = _get_work_area()
+            pos = (position or "left").strip().lower()
+
+            # Calculate target bounding box
+            if x is not None and y is not None and width is not None and height is not None:
+                new_x, new_y, new_w, new_h = x, y, width, height
+            elif pos in ("left", "left_half", "left-half"):
+                new_x = work_x
+                new_y = work_y
+                new_w = work_w // 2
+                new_h = work_h
+            elif pos in ("right", "right_half", "right-half"):
+                new_x = work_x + (work_w // 2)
+                new_y = work_y
+                new_w = work_w - (work_w // 2)
+                new_h = work_h
+            elif pos in ("top", "top_half", "top-half"):
+                new_x = work_x
+                new_y = work_y
+                new_w = work_w
+                new_h = work_h // 2
+            elif pos in ("bottom", "bottom_half", "bottom-half"):
+                new_x = work_x
+                new_y = work_y + (work_h // 2)
+                new_w = work_w
+                new_h = work_h - (work_h // 2)
+            elif pos in ("top_left", "top-left", "topleft"):
+                new_x = work_x
+                new_y = work_y
+                new_w = work_w // 2
+                new_h = work_h // 2
+            elif pos in ("top_right", "top-right", "topright"):
+                new_x = work_x + (work_w // 2)
+                new_y = work_y
+                new_w = work_w - (work_w // 2)
+                new_h = work_h // 2
+            elif pos in ("bottom_left", "bottom-left", "bottomleft"):
+                new_x = work_x
+                new_y = work_y + (work_h // 2)
+                new_w = work_w // 2
+                new_h = work_h - (work_h // 2)
+            elif pos in ("bottom_right", "bottom-right", "bottomright"):
+                new_x = work_x + (work_w // 2)
+                new_y = work_y + (work_h // 2)
+                new_w = work_w - (work_w // 2)
+                new_h = work_h - (work_h // 2)
+            elif pos in ("center", "centered"):
+                new_w = int(work_w * 0.70)
+                new_h = int(work_h * 0.75)
+                new_x = work_x + ((work_w - new_w) // 2)
+                new_y = work_y + ((work_h - new_h) // 2)
+            else:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Unknown position preset '{position}'. "
+                        "Supported: 'left', 'right', 'top', 'bottom', 'top_left', 'top_right', "
+                        "'bottom_left', 'bottom_right', 'center', or custom x/y/width/height."
+                    ),
+                }
+
+            # Move and resize window
+            win32gui.MoveWindow(target_hwnd, new_x, new_y, new_w, new_h, True)
+            win32gui.BringWindowToTop(target_hwnd)
+            win32gui.SetForegroundWindow(target_hwnd)
+
+            return {
+                "success": True,
+                "hwnd": target_hwnd,
+                "title": title,
+                "position": pos,
+                "rect": {
+                    "x": new_x,
+                    "y": new_y,
+                    "width": new_w,
+                    "height": new_h,
+                },
+                "message": f"Successfully snapped '{title}' to {pos} layout ({new_w}x{new_h} at ({new_x}, {new_y})).",
+            }
+        except Exception as exc:
+            logger.exception("Failed to snap window %s: %s", target_hwnd, exc)
+            return {
+                "success": False,
+                "hwnd": target_hwnd,
+                "title": title,
+                "error": f"Failed to snap window: {exc}",
+            }
+

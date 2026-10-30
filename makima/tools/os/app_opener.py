@@ -15,8 +15,10 @@ import difflib
 import io
 import logging
 import os
+import shlex
 import shutil
-from typing import Any, Dict, List, Optional
+import subprocess
+from typing import Any, Dict, List, Optional, Union
 
 from makima.tools.registry import tool
 
@@ -102,6 +104,7 @@ def _resolve_application_target(app_name: str, match_closest: bool = True) -> Op
 )
 def launch_application(
     app_name: str,
+    args: Optional[Union[List[str], str]] = None,
     match_closest: bool = True,
     dry_run: bool = False,
 ) -> Dict[str, Any]:
@@ -110,6 +113,7 @@ def launch_application(
 
     Args:
         app_name: Name of the application (e.g. 'notepad', 'calc', 'spotify') or protocol URI (e.g. 'calc:', 'spotify:', 'ms-settings:').
+        args: Optional command line arguments when launching executables.
         match_closest: If True, attempts fuzzy matching when exact name is not registered.
         dry_run: If True, validates resolution without executing the application.
 
@@ -123,6 +127,54 @@ def launch_application(
         }
 
     clean_app = app_name.strip()
+    candidate = clean_app.rstrip(":")
+
+    # 0. Handle explicit arguments if provided
+    if args is not None:
+        parsed_args: List[str] = []
+        if isinstance(args, str):
+            if args.strip():
+                parsed_args = shlex.split(args.strip(), posix=False)
+        elif isinstance(args, (list, tuple)):
+            parsed_args = [str(a) for a in args]
+
+        which_exe = shutil.which(candidate) or shutil.which(f"{candidate}.exe") or candidate
+        cmd = [which_exe] + parsed_args
+        if dry_run:
+            return {
+                "success": True,
+                "app_name": clean_app,
+                "target": which_exe,
+                "command": cmd,
+                "method": "subprocess",
+                "dry_run": True,
+                "message": f"Command '{cmd}' is valid and ready to launch (dry-run).",
+            }
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                creationflags=creationflags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+            )
+            return {
+                "success": True,
+                "pid": proc.pid,
+                "app_name": clean_app,
+                "executable": which_exe,
+                "command": cmd,
+                "message": f"Successfully launched '{clean_app}' (PID: {proc.pid}).",
+            }
+        except Exception as proc_exc:
+            return {
+                "success": False,
+                "app_name": clean_app,
+                "error": f"Failed to launch with arguments: {proc_exc}",
+            }
+
     is_protocol = ":" in clean_app or clean_app.startswith("ms-")
 
     # 1. Handle Protocol URIs directly via os.startfile

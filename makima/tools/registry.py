@@ -47,6 +47,23 @@ DEFAULT_MUTATING_TAGS: Set[str] = {
     "kill", "window", "mouse", "keyboard", "uia", "mutating",
 }
 
+# Canonical tool aliases for seamless resolution of consolidated tools
+CANONICAL_TOOL_ALIASES: Dict[str, str] = {
+    "search_web": "web_search",
+    "fetch_web_page": "fetch_page",
+    "launch_app": "launch_application",
+    "remember_preference": "remember_user_preference",
+    "save_preference": "remember_user_preference",
+    "save_fact": "remember_fact",
+    "kill_port": "free_port",
+    "release_port": "free_port",
+    "copy_to_clipboard": "set_clipboard_text",
+    "read_clipboard": "get_clipboard_text",
+    "whatsapp_send": "send_whatsapp_message",
+    "send_whatsapp": "send_whatsapp_message",
+    "whatsapp_status": "check_whatsapp_status",
+}
+
 
 def get_concurrency_tag_boundaries() -> Tuple[Set[str], Set[str]]:
     """
@@ -599,13 +616,17 @@ class ToolRegistry:
         return self._tools.pop(name, None)
 
     def get(self, name: str) -> Optional[Tool]:
-        """Retrieves a tool by name (exact match, with case-insensitive fallback)."""
+        """Retrieves a tool by name (exact match, case-insensitive, or canonical alias)."""
         if name in self._tools:
             return self._tools[name]
         lower_name = name.lower()
         for k, v in self._tools.items():
             if k.lower() == lower_name:
                 return v
+        # Resolve via canonical alias if not directly registered
+        alias_target = CANONICAL_TOOL_ALIASES.get(name) or CANONICAL_TOOL_ALIASES.get(lower_name)
+        if alias_target:
+            return self.get(alias_target)
         return None
 
     def has(self, name: str) -> bool:

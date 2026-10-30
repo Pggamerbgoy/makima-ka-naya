@@ -37,30 +37,29 @@ const SURPRISE_PROMPTS = [
 ];
 
 const HERO_ROTATING_WORDS = [
-  'architect autonomous systems ⚡',
-  'automate desktop workflows 🖥️',
-  'debug & refactor codebases 🔍',
-  'synthesize deep web research 🌐',
-  'craft live Canvas artifacts 🎨',
-  'analyze real-time telemetry 📊',
-  'orchestrate 12 AI agents 🧠',
+  'orchestrate local PC workflows ⚡',
+  'snap & tile desktop windows 🖥️',
+  'free stuck network ports 🔌',
+  'inspect Git status & diffs 🔍',
+  'bridge WhatsApp & unified inbox 💬',
+  'craft live Canvas code & diagrams 🎨',
 ];
 
 const TYPEWRITER_PROMPTS = [
-  'Build a FastAPI microservice with persistent HTTP/2 pooling...',
-  'Scan my repository for memory leaks and security vulnerabilities...',
-  'Render an interactive system architecture diagram in Canvas...',
-  'Summarize this week’s telemetry metrics into a chart and table...',
-  'Automate my morning desktop workspace and play lofi beats...',
+  'Check local Git repository status and show uncommitted diffs...',
+  'Free port 3000 by terminating the occupying process...',
+  'Snap active editor to left 50% and browser to right 50%...',
+  'Summarize recent WhatsApp messages and VIP contact alerts...',
+  'Read current text from my OS clipboard and format it as markdown...',
 ];
 
 const FLOATING_KEYWORDS = [
-  'Pareto Router',
-  '12 AI Agents',
+  'Win32 Tiling',
+  'Port Freeing',
+  'Git Engine',
+  'Universal Inbox',
+  'Clipboard API',
   'Canvas Studio',
-  'EternalMemory',
-  'Gemini Live Voice',
-  'Zero-Latency',
 ];
 
 
@@ -169,18 +168,9 @@ function WelcomeHeroStage({
   return (
     <div className="welcome">
       <div className="welcome-orbit-wrap">
-        <div className="floating-keywords-cloud" aria-hidden="true">
-          {FLOATING_KEYWORDS.map((kw, i) => (
-            <span
-              key={kw}
-              className={`floating-keyword kw-${i}`}
-              style={{ animationDelay: `${i * 0.95}s` }}
-            >
-              {kw}
-            </span>
-          ))}
+        <div className="welcome-icon">
+          <Sparkles size={26} />
         </div>
-        <div className="welcome-icon"><Sparkles size={24} /></div>
       </div>
 
       <h1 className="hero-title-shimmer">What shall we make?</h1>
@@ -207,11 +197,69 @@ function WelcomeHeroStage({
         <span className="typewriter-caret" aria-hidden="true">▍</span>
       </button>
 
-      <div className="suggestions">
-        <button className="surprise-button" onClick={onSurprise}><Sparkles size={14} /> Surprise me 🎲</button>
-        <button onClick={() => onSelectDraft('Inspect the current project and summarize the architecture')}>Inspect my project <ArrowDownToLine size={14} /></button>
-        <button onClick={() => onSelectDraft('Create a chart from this week’s telemetry')}>Analyze telemetry <Activity size={14} /></button>
-        <button onClick={() => onSelectDraft('Plan a safe OSWorld-style UI task')}>Plan a benchmark task <Zap size={14} /></button>
+      <div className="capability-cards-grid">
+        <button
+          type="button"
+          className="capability-card"
+          onClick={() => onSelectDraft('Check local Git repository status and show recent uncommitted diffs')}
+        >
+          <div className="capability-card-icon git-icon"><Layers size={18} /></div>
+          <div className="capability-card-body">
+            <strong>Git Status & Diffs</strong>
+            <span>Inspect branch state, staged changes, and clean unpaged diffs</span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className="capability-card"
+          onClick={() => onSelectDraft('Check if port 3000 or 8080 is occupied, and identify or free the process')}
+        >
+          <div className="capability-card-icon port-icon"><Zap size={18} /></div>
+          <div className="capability-card-body">
+            <strong>Process & Port Killer</strong>
+            <span>Inspect socket listeners and terminate rogue processes blocking ports</span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className="capability-card"
+          onClick={() => onSelectDraft('Snap active window to the left 50% and browser to the right 50%')}
+        >
+          <div className="capability-card-icon window-icon"><Cpu size={18} /></div>
+          <div className="capability-card-body">
+            <strong>Win32 Window Tiling</strong>
+            <span>Tile apps side-by-side or snap focus to clean 50/50 splits</span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className="capability-card"
+          onClick={() => onSelectDraft('Summarize recent WhatsApp messages and list any VIP contact updates')}
+        >
+          <div className="capability-card-icon wa-icon"><MessageSquare size={18} /></div>
+          <div className="capability-card-body">
+            <strong>WhatsApp & Inbox Hub</strong>
+            <span>Review unread messages, priority VIP alerts, and draft quick replies</span>
+          </div>
+        </button>
+      </div>
+
+      <div className="quick-prompt-chips">
+        <button type="button" className="surprise-pill" onClick={onSurprise}>
+          <Sparkles size={13} /> Surprise me 🎲
+        </button>
+        <button type="button" className="quick-pill" onClick={() => onSelectDraft('Inspect system stats and RAM consumption')}>
+          <Activity size={13} /> Hardware telemetry
+        </button>
+        <button type="button" className="quick-pill" onClick={() => onSelectDraft('Read current text from my OS clipboard and summarize it')}>
+          <ArrowDownToLine size={13} /> Inspect clipboard
+        </button>
+        <button type="button" className="quick-pill" onClick={() => onSelectDraft('Create an interactive architecture diagram in Canvas')}>
+          <Layers size={13} /> Canvas diagram
+        </button>
       </div>
     </div>
   );
@@ -1098,11 +1146,12 @@ Please apply the requested changes, explain what was modified, and provide the u
     notify('Instruction sent to Makima. Watch chat for updates.', 'info');
   }, [notify, send]);
 
+  const isOverlay = useMemo(() => new URLSearchParams(window.location.search).has('overlay'), []);
   const pageTitle = view === 'chat' ? sessionName : view === 'artifacts' ? 'Saved artifacts' : 'Telemetry & health';
   const isGenerating = Boolean(socket.activeTaskId || messages.some((m) => m.role === 'assistant' && m.pending));
   const canSend = connection === 'connected' && !isGenerating && Boolean(draft.trim() || attachments.length);
 
-  return <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
+  return <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'} ${isOverlay ? 'overlay-mode' : ''}`}>
     <div className={`ambient-glow ${isGenerating ? 'active' : ''}`} />
     <aside className={`sidebar ${sessionDrawerOpen ? 'session-drawer-open' : ''}`}>
       <div className="brand">
@@ -1120,34 +1169,77 @@ Please apply the requested changes, explain what was modified, and provide the u
       </div>
       <Button className="new-chat" onClick={() => void clearChat()}><Plus size={16} /> New session</Button>
       <Button className="search-sessions" onClick={() => { setSessionDrawerOpen(true); setSessionSearch(''); }}><Search size={15} /> Search chats <kbd>⌘K</kbd></Button>
-      <div className="side-section"><small>WORKSPACE</small><button className={`side-item ${view === 'chat' ? 'active' : ''}`} onClick={() => setView('chat')}><MessageSquare size={15} /> Chat</button><button className={`side-item ${view === 'artifacts' ? 'active' : ''}`} onClick={() => setView('artifacts')}><Archive size={15} /> Artifacts <em>{artifacts.length}</em></button><button className={`side-item ${view === 'telemetry' ? 'active' : ''}`} onClick={() => setView('telemetry')}><Gauge size={15} /> Telemetry</button></div>
-      <div className="session-list"><small>RECENT CHATS</small>{sessions.slice(0, 8).map((session) => <div className={`session-row ${session.id === currentSessionId ? 'active' : ''}`} key={session.id}><button className="session-item" onClick={() => void loadSession(session)}><span>{session.pinned ? '★ ' : ''}{session.title}</span><small>{session.message_count} messages</small></button><button type="button" className="session-delete-btn" title={`Delete "${session.title}"`} aria-label={`Delete ${session.title}`} onClick={(e) => void deleteSession(session.id, e)}><Trash2 size={12} /></button></div>)}{!sessions.length && <span className="muted session-empty">No saved chats yet.</span>}</div>
+      <div className="session-list"><small>RECENT SESSIONS</small>{sessions.slice(0, 12).map((session) => <div className={`session-row ${session.id === currentSessionId ? 'active' : ''}`} key={session.id}><button className="session-item" onClick={() => void loadSession(session)}><span>{session.pinned ? '★ ' : ''}{session.title}</span><small>{session.message_count} messages</small></button><button type="button" className="session-delete-btn" title={`Delete "${session.title}"`} aria-label={`Delete ${session.title}`} onClick={(e) => void deleteSession(session.id, e)}><Trash2 size={12} /></button></div>)}{!sessions.length && <span className="muted session-empty">No saved chats yet.</span>}</div>
       <div className="sidebar-spacer" />
       <div className="sidebar-status"><span className={`status-dot ${connection === 'connected' ? 'good' : ''}`} /> {connectionLabel(connection)}</div>
       <Button className="settings-button" onClick={() => setSettingsOpen(true)}><Settings size={16} /> Settings</Button>
     </aside>
     <main className="main-panel">
       <header className="topbar">
-        <Button className="sidebar-expand-btn" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setSidebarOpen((open) => !open)} style={{ marginRight: '8px', padding: '6px', minWidth: 'auto' }}><Menu size={18} /></Button>
-        <div className="mobile-brand"><span>Makima</span></div>
-        <div className="session-heading">
-          <span className={`status-dot ${connection === 'connected' ? 'good' : ''}`} />
-          <input value={pageTitle} onChange={(event) => view === 'chat' && setSessionName(event.target.value)} aria-label="Session name" readOnly={view !== 'chat'} />
-          {view === 'chat' && currentSessionId && (
-            <button
-              type="button"
-              className="session-header-delete-btn"
-              title="Delete this chat"
-              aria-label="Delete this chat"
-              onClick={() => void deleteSession(currentSessionId)}
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
+        <div className="topbar-left">
+          <Button className="sidebar-expand-btn" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setSidebarOpen((open) => !open)} style={{ marginRight: '8px', padding: '6px', minWidth: 'auto' }}><Menu size={18} /></Button>
+          <div className="mobile-brand"><span>Makima</span></div>
+          <div className="session-heading">
+            <input value={pageTitle} onChange={(event) => view === 'chat' && setSessionName(event.target.value)} aria-label="Session name" readOnly={view !== 'chat'} />
+            {view === 'chat' && currentSessionId && (
+              <button
+                type="button"
+                className="session-header-delete-btn"
+                title="Delete this chat"
+                aria-label="Delete this chat"
+                onClick={() => void deleteSession(currentSessionId)}
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
         </div>
-        <div className="top-actions"><Button className="command-button" title="Open command palette" aria-label="Open command palette" onClick={() => { setCommandOpen(true); setCommandQuery(''); }}><Command size={15} /><kbd>⌘K</kbd></Button><ModelPicker backends={backends} activeBackend={settings.active_backend} onSelect={(backendId) => void updateSettings({ active_backend: backendId })} /><Button className="topbar-label-button" title="Plugins & OpenAPI" onClick={() => setPluginsOpen(true)}><Cpu size={14} /><span>Plugins</span></Button><Button className="topbar-label-button" title="Connectors" onClick={() => { setTab('connectors'); setSettingsOpen(true); }}><Layers size={14} /><span>Connectors</span></Button><Button className="topbar-label-button" title="Voice settings" onClick={() => { setTab('voice'); setSettingsOpen(true); }}><Mic size={14} /><span>Voice</span></Button><Button className="topbar-label-button" title="Telemetry" onClick={() => setView('telemetry')}><Gauge size={14} /><span>Telemetry</span></Button><Button className="topbar-label-button" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={14} /><span>Settings</span></Button><Button title="Toggle theme" aria-label="Toggle theme" onClick={() => void updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })}>{settings.theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</Button></div>
+
+        <nav className="studio-view-nav" aria-label="Workspace views">
+          <button
+            type="button"
+            className={`studio-nav-tab ${view === 'chat' ? 'active' : ''}`}
+            onClick={() => setView('chat')}
+          >
+            <MessageSquare size={13} />
+            <span>Chat</span>
+          </button>
+          <button
+            type="button"
+            className={`studio-nav-tab ${view === 'artifacts' ? 'active' : ''}`}
+            onClick={() => setView('artifacts')}
+          >
+            <Archive size={13} />
+            <span>Artifacts</span>
+            {artifacts.length > 0 && <span className="studio-nav-badge">{artifacts.length}</span>}
+          </button>
+          <button
+            type="button"
+            className={`studio-nav-tab ${view === 'telemetry' ? 'active' : ''}`}
+            onClick={() => setView('telemetry')}
+          >
+            <Gauge size={13} />
+            <span>Telemetry</span>
+          </button>
+        </nav>
+
+        <div className="top-actions">
+          <div
+            className={`connection-status-pill ${connection === 'connected' ? 'connected' : 'disconnected'}`}
+            title={connection === 'connected' ? 'Connected to local Makima daemon' : 'Click to reconnect'}
+            onClick={() => connection !== 'connected' && socket.reconnect()}
+          >
+            <span className={`status-dot ${connection === 'connected' ? 'good' : ''}`} />
+            <span>{connection === 'connected' ? 'Local Live' : 'Offline'}</span>
+          </div>
+          <ModelPicker backends={backends} activeBackend={settings.active_backend} onSelect={(backendId) => void updateSettings({ active_backend: backendId })} />
+          <Button className="command-button" title="Open command palette (⌘K)" aria-label="Open command palette" onClick={() => { setCommandOpen(true); setCommandQuery(''); }}><Command size={14} /><kbd>⌘K</kbd></Button>
+          <Button className="topbar-icon-button" title="Plugins & MCP" aria-label="Plugins" onClick={() => setPluginsOpen(true)}><Cpu size={14} /></Button>
+          <Button className="topbar-icon-button" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings size={14} /></Button>
+          <Button className="topbar-icon-button" title="Toggle theme" aria-label="Toggle theme" onClick={() => void updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })}>{settings.theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}</Button>
+        </div>
       </header>
-      {connection !== 'connected' && <div className="connection-banner" role="status"><span className="status-dot" /> {connectionLabel(connection)} Your current task will not be resent automatically. <Button onClick={socket.reconnect}>Reconnect</Button></div>}
+      {connection !== 'connected' && <div className="connection-banner" role="status"><span className="status-dot" /> {connectionLabel(connection)} — Local Makima server offline. <Button onClick={socket.reconnect}>Reconnect</Button></div>}
       {socket.taskStage && socket.activeTaskId && <div className="task-notice" role="status" aria-live="polite">{socket.taskStage} <span className="muted">· one foreground task</span></div>}
       {view === 'chat' && <>
         <div className="chat-scroll" ref={chatScrollRef} onScroll={handleChatScroll}>

@@ -26,9 +26,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-import psutil
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore
+
+try:
+    from watchdog.events import FileSystemEvent, FileSystemEventHandler
+    from watchdog.observers import Observer
+except ImportError:
+    class FileSystemEvent:  # type: ignore
+        event_type: str = ""
+        src_path: str = ""
+        is_directory: bool = False
+
+    class FileSystemEventHandler:  # type: ignore
+        pass
+
+    Observer = None  # type: ignore
 
 logger = logging.getLogger("makima.sentinel.event_daemon")
 

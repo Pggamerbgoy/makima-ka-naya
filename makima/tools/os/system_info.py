@@ -134,3 +134,106 @@ def get_system_stats() -> Dict[str, Any]:
             "uptime_seconds": uptime_seconds,
         },
     }
+
+
+@tool(
+    name="get_gpu_info",
+    description="Check dedicated GPU hardware metrics (NVIDIA VRAM, compute usage, temperature, driver version).",
+    tags=["os", "hardware", "gpu", "telemetry"],
+)
+def get_gpu_info() -> Dict[str, Any]:
+    """
+    Retrieves graphics card (GPU) telemetry using nvidia-smi with cross-platform fallback.
+
+    Returns:
+        Dictionary containing GPU model, VRAM total/used/free, temperature, and utilization percent.
+    """
+    import shutil
+    import subprocess
+
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        return {
+            "available": False,
+            "message": "nvidia-smi is not found. Dedicated NVIDIA GPU or driver not detected.",
+            "gpus": [],
+        }
+
+    try:
+        cmd = [
+            nvidia_smi,
+            "--query-gpu=name,memory.total,memory.used,memory.free,temperature.gpu,utilization.gpu",
+            "--format=csv,noheader,nounits",
+        ]
+        out = subprocess.check_output(cmd, text=True, timeout=3.0).strip()
+        gpus: List[Dict[str, Any]] = []
+        for line in out.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 6:
+                gpus.append({
+                    "name": parts[0],
+                    "vram_total_mb": float(parts[1]),
+                    "vram_used_mb": float(parts[2]),
+                    "vram_free_mb": float(parts[3]),
+                    "temperature_c": float(parts[4]),
+                    "utilization_pct": float(parts[5]),
+                })
+        return {
+            "available": True,
+            "count": len(gpus),
+            "gpus": gpus,
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "error": str(exc),
+            "gpus": [],
+        }
+
+
+@tool(
+    name="find_port_listeners",
+    description="Inspect active network listening ports and identify which process/PID is binding them.",
+    tags=["os", "network", "ports", "debug"],
+)
+def find_port_listeners(port: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Inspects TCP/UDP network connections to identify which application is listening on specific ports.
+
+    Args:
+        port: Optional specific port number (e.g. 3000, 8000, 5432). If omitted, lists all listening ports.
+
+    Returns:
+        List of matching port listeners with port, pid, process_name, and status.
+    """
+    results: List[Dict[str, Any]] = []
+    try:
+        connections = psutil.net_connections(kind="inet")
+        for conn in connections:
+            if conn.status == psutil.CONN_LISTEN:
+                laddr = conn.laddr
+                if port is not None and laddr.port != port:
+                    continue
+
+                proc_name = ""
+                if conn.pid:
+                    try:
+                        proc = psutil.Process(conn.pid)
+                        proc_name = proc.name()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        proc_name = "[System / Inaccessible]"
+
+                results.append({
+                    "port": laddr.port,
+                    "ip": laddr.ip,
+                    "pid": conn.pid,
+                    "process_name": proc_name,
+                    "type": "tcp" if conn.type == 1 else "udp",
+                })
+    except (psutil.AccessDenied, PermissionError):
+        logger.debug("Port enumeration requires elevated permissions.")
+    except Exception as exc:
+        logger.debug("Port inspection notice: %s", exc)
+
+    return sorted(results, key=lambda x: x["port"])
+

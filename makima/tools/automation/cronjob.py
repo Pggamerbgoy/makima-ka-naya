@@ -267,6 +267,25 @@ def _build_trigger(
     if not clean_sched:
         raise ValueError("Either 'schedule' or 'delay_seconds' must be provided.")
 
+    # Check natural 'in <amount> <unit>' delay (e.g. 'in 10 minutes', 'in 30s', 'in 1 hr')
+    in_m = re.match(r"^in\s+(\d+(?:\.\d+)?)\s*([a-zA-Z]*)$", clean_sched, re.IGNORECASE)
+    if in_m:
+        val = float(in_m.group(1))
+        unit = in_m.group(2).lower()
+        multiplier = 1.0
+        if unit in ("", "s", "sec", "secs", "second", "seconds"):
+            multiplier = 1.0
+        elif unit in ("m", "min", "mins", "minute", "minutes"):
+            multiplier = 60.0
+        elif unit in ("h", "hr", "hrs", "hour", "hours"):
+            multiplier = 3600.0
+        elif unit in ("d", "day", "days"):
+            multiplier = 86400.0
+        elif unit in ("w", "wk", "wks", "week", "weeks"):
+            multiplier = 604800.0
+        run_at = datetime.now(timezone.utc) + timedelta(seconds=val * multiplier)
+        return DateTrigger(run_date=run_at, timezone=timezone.utc)
+
     # Check interval
     lowered = clean_sched.lower()
     if lowered.startswith("interval:") or lowered.startswith("interval=") or lowered.startswith("every "):
@@ -292,7 +311,8 @@ def _build_trigger(
 
     raise ValueError(
         f"Unrecognized schedule expression: '{schedule}'. "
-        f"Provide a 5-field cron format (e.g. '0 9 * * *'), an interval (e.g. 'interval:60'), or delay_seconds."
+        f"Provide a 5-field cron format (e.g. '0 9 * * *'), an interval (e.g. 'interval:60', 'every 10m'), "
+        f"or a relative delay (e.g. 'in 15 minutes')."
     )
 
 
@@ -376,6 +396,35 @@ async def cronjob_manage(
         Dict with status and details of the operation.
     """
     act = action.strip().lower()
+    # Normalize common action aliases
+    ACTION_ALIASES = {
+        "add": "create",
+        "new": "create",
+        "set": "create",
+        "schedule": "create",
+        "delete": "remove",
+        "del": "remove",
+        "cancel": "remove",
+        "stop": "pause",
+        "start": "resume",
+        "unpause": "resume",
+        "status": "list",
+        "show": "list",
+        "all": "list",
+        "jobs": "list",
+        "execute": "run",
+        "trigger": "run",
+    }
+    act = ACTION_ALIASES.get(act, act)
+
+    if act in ("history", "logs", "log"):
+        history = get_execution_history()
+        return {
+            "status": "success",
+            "count": len(history),
+            "history": history,
+        }
+
     scheduler = start_scheduler()
 
     # 1. CREATE

@@ -122,7 +122,7 @@ def main() -> int:
     bin_path = pathlib.Path(__file__).parent / "bin" / "makima-native-overlay.exe"
     exe_target = bin_path if bin_path.exists() else None
 
-    # Default to Slint GPU native binary if available, fallback to High-DPI Python HUD
+    # Priority 1: Slint GPU native binary if available
     if "--python" not in sys.argv and exe_target is not None:
         print(f"[+] Launching Hardware-Accelerated Slint GPU Overlay: {exe_target}")
         proc = subprocess.Popen([str(exe_target)])
@@ -133,7 +133,19 @@ def main() -> int:
             proc.terminate()
             return 0
 
-    print("[+] Launching High-DPI Windows Native HUD...")
+    # Priority 2: Modern WebView2 / Web Spotlight HUD (Option 1)
+    if "--tkinter" not in sys.argv:
+        try:
+            from makima.overlay.hud_webview import WebViewSpotlightHUD
+            print("[+] Launching GPU-Accelerated WebView2 Spotlight HUD...")
+            web_hud = WebViewSpotlightHUD()
+            if web_hud.launch():
+                return 0
+        except Exception as exc:
+            logging.getLogger("makima.overlay").debug(f"WebView2 HUD launch skipped: {exc}")
+
+    # Priority 3: High-DPI Windows Tkinter Native HUD Fallback
+    print("[+] Launching Windows Native Tkinter HUD (Fallback)...")
     hud = SpotlightHUD()
     hud.mainloop()
     return 0
@@ -141,3 +153,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

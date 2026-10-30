@@ -17,9 +17,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import psutil
-import win32con
-import win32gui
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore
+
+try:
+    import win32con
+    import win32gui
+except ImportError:
+    win32con = None  # type: ignore
+    win32gui = None  # type: ignore
 
 logger = logging.getLogger("makima.sentinel.observer")
 
@@ -54,24 +62,32 @@ GAME_PROCESSES = {
 
 def _get_data_dir() -> Path:
     """Resolve ~/.makima, creating it if absent."""
-    from makima.config import get_settings
-    raw = get_settings().app.data_dir  # returns "~/.makima" string
-    p = Path(raw).expanduser()
+    try:
+        from makima.config import get_settings
+        raw = get_settings().app.data_dir  # returns "~/.makima" string
+        p = Path(raw).expanduser()
+    except Exception:
+        p = Path.home() / ".makima"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def _get_idle_seconds() -> float:
     """Returns seconds since last mouse/keyboard input using Win32 LASTINPUTINFO."""
-    class LASTINPUTINFO(ctypes.Structure):
-        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+    try:
+        if not hasattr(ctypes, "windll"):
+            return 0.0
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
 
-    lii = LASTINPUTINFO()
-    lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
-    if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
-        tick_count = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
-        elapsed_ms = (tick_count - lii.dwTime) & 0xFFFFFFFF
-        return max(0.0, elapsed_ms / 1000.0)
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+        if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            tick_count = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+            elapsed_ms = (tick_count - lii.dwTime) & 0xFFFFFFFF
+            return max(0.0, elapsed_ms / 1000.0)
+    except Exception:
+        pass
     return 0.0
 
 
@@ -82,10 +98,12 @@ def _get_active_window() -> Dict[str, Any]:
     active Windows desktop station, ensuring 100% reliable foreground window discovery
     even in background worker or subprocess contexts.
     """
-    from makima.tools.os.windows import _open_interactive_desktop
-
     result: Dict[str, Any] = {"process": "", "title": "", "hwnd": 0}
+    if win32gui is None or not hasattr(ctypes, "windll"):
+        return result
+
     try:
+        from makima.tools.os.windows import _open_interactive_desktop
         with _open_interactive_desktop():
             fg_hwnd = win32gui.GetForegroundWindow()
             if fg_hwnd and win32gui.IsWindowVisible(fg_hwnd):
@@ -94,7 +112,7 @@ def _get_active_window() -> Dict[str, Any]:
                 ctypes.windll.user32.GetWindowThreadProcessId(fg_hwnd, ctypes.byref(pid_buf))
                 pid = pid_buf.value
                 proc_name = ""
-                if pid:
+                if pid and psutil is not None:
                     try:
                         proc_name = psutil.Process(pid).name()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -142,7 +160,7 @@ def _is_fullscreen(hwnd: int) -> bool:
     Returns True if the given window handle covers or exceeds the primary monitor.
     Direct O(1) rect comparison without expensive window enumeration.
     """
-    if not hwnd:
+    if not hwnd or win32gui is None or not hasattr(ctypes, "windll"):
         return False
     try:
         screen_w = ctypes.windll.user32.GetSystemMetrics(0)  # SM_CXSCREEN

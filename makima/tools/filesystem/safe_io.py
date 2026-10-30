@@ -193,6 +193,7 @@ def read_file(path: str, encoding: str = "utf-8") -> str:
         return f.read()
 
 
+
 @tool(
     name="write_file",
     description="Write text content to a file within the workspace boundary. Overwriting existing files requires overwrite=True and creates an automatic SAGA snapshot.",
@@ -458,3 +459,121 @@ def list_directory(
     # Sort directories first, then alphabetical
     results.sort(key=lambda x: (0 if x["type"] == "directory" else 1, x["name"].lower()))
     return results
+
+
+@tool(
+    name="search_files",
+    description="Search text content across files in the workspace using regex or keywords with line numbers and file pattern filtering.",
+    tags=["filesystem", "search", "code", "grep"],
+)
+def search_files(
+    query: str,
+    path: str = ".",
+    file_pattern: str = "*",
+    max_results: int = 50,
+    case_sensitive: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Search for text or regex patterns across files in the workspace.
+
+    Args:
+        query: Search term or regular expression pattern.
+        path: Root directory to search within (defaults to workspace root).
+        file_pattern: Glob pattern to filter filenames (e.g. '*.py', '*.ts', '*.json').
+        max_results: Maximum number of matching lines to return (defaults to 50).
+        case_sensitive: Whether search should be case sensitive (defaults to False).
+
+    Returns:
+        List of match dictionaries containing file_path, line_number, line_content, and match_count.
+    """
+    resolved = resolve_safe_path(path)
+    ws = get_workspace_dir().resolve()
+
+    if not resolved.exists() or not resolved.is_dir():
+        return []
+
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        regex = re.compile(query, flags)
+    except re.error:
+        regex = re.compile(re.escape(query), flags)
+
+    matches: List[Dict[str, Any]] = []
+
+    for root, dirs, files in os.walk(resolved):
+        root_path = Path(root)
+        if ".snapshots" in root_path.parts or ".git" in root_path.parts or "node_modules" in root_path.parts:
+            continue
+
+        for f in files:
+            if not Path(f).match(file_pattern):
+                continue
+
+            file_path = root_path / f
+            try:
+                rel_path = str(file_path.relative_to(ws)).replace("\\", "/")
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
+                    for line_idx, line in enumerate(fh, 1):
+                        if regex.search(line):
+                            matches.append({
+                                "file": rel_path,
+                                "line": line_idx,
+                                "content": line.strip()[:200],
+                            })
+                            if len(matches) >= max_results:
+                                return matches
+            except Exception:
+                continue
+
+    return matches
+
+
+@tool(
+    name="get_directory_tree",
+    description="Generate a clean ASCII directory structure tree of the workspace with depth limits.",
+    tags=["filesystem", "tree", "overview"],
+)
+def get_directory_tree(
+    path: str = ".",
+    max_depth: int = 3,
+    include_files: bool = True,
+) -> str:
+    """
+    Generate an ASCII tree diagram representing directory structure.
+
+    Args:
+        path: Target root directory relative to workspace boundary.
+        max_depth: Maximum recursion depth for tree generation (defaults to 3).
+        include_files: If True, lists both folders and files; if False, directories only.
+
+    Returns:
+        Formatted multi-line ASCII tree string.
+    """
+    resolved = resolve_safe_path(path)
+    lines: List[str] = [resolved.name or "."]
+
+    def _build(curr: Path, prefix: str, depth: int):
+        if depth > max_depth:
+            return
+        try:
+            items = sorted(
+                [p for p in curr.iterdir() if p.name not in (".snapshots", ".git", "node_modules", "__pycache__")],
+                key=lambda p: (0 if p.is_dir() else 1, p.name.lower()),
+            )
+            if not include_files:
+                items = [p for p in items if p.is_dir()]
+
+            total = len(items)
+            for idx, item in enumerate(items):
+                is_last = (idx == total - 1)
+                connector = "└── " if is_last else "├── "
+                sub_prefix = "    " if is_last else "│   "
+                lines.append(f"{prefix}{connector}{item.name}{'/' if item.is_dir() else ''}")
+                if item.is_dir():
+                    _build(item, prefix + sub_prefix, depth + 1)
+        except Exception:
+            pass
+
+    _build(resolved, "", 1)
+    return "\n".join(lines)
+

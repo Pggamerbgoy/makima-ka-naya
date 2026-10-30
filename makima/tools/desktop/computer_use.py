@@ -190,11 +190,31 @@ def computer_use(
     elif act in ("som", "set_of_marks", "annotate"):
         return annotate_window_som(title_query=title_query, hwnd=hwnd)
 
-    elif act == "cursor_position":
-        return get_cursor_position()
+    # Clipboard & Editing Shortcuts
+    elif act in ("copy", "clipboard_copy"):
+        return keyboard_hotkey(keys=["ctrl", "c"])
+
+    elif act in ("paste", "clipboard_paste"):
+        return keyboard_hotkey(keys=["ctrl", "v"])
+
+    elif act in ("cut", "clipboard_cut"):
+        return keyboard_hotkey(keys=["ctrl", "x"])
+
+    elif act in ("select_all", "selectall"):
+        return keyboard_hotkey(keys=["ctrl", "a"])
+
+    elif act == "undo":
+        return keyboard_hotkey(keys=["ctrl", "z"])
+
+    elif act == "redo":
+        return keyboard_hotkey(keys=["ctrl", "y"])
 
     else:
         return {
             "success": False,
-            "error": f"Unknown computer_use action: '{action}'. Supported: click, double_click, right_click, middle_click, mouse_move, drag, type, key, hotkey, scroll, screenshot, som, cursor_position.",
+            "error": (
+                f"Unknown computer_use action: '{action}'. Supported: click, double_click, right_click, "
+                "middle_click, mouse_move, drag, type, key, hotkey, scroll, screenshot, som, "
+                "cursor_position, copy, paste, cut, select_all, undo, redo."
+            ),
         }

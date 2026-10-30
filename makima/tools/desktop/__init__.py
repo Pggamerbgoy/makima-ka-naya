@@ -3,6 +3,11 @@ Makima v2 — Desktop Tools Package.
 Universal Zero-Vision Microsoft UI Automation (UIA) tools.
 """
 
+from makima.tools.desktop.clipboard import (
+    clear_clipboard,
+    get_clipboard_text,
+    set_clipboard_text,
+)
 from makima.tools.desktop.computer_use import computer_use
 from makima.tools.desktop.input import (
     get_cursor_position,
@@ -47,4 +52,8 @@ __all__ = [
     "keyboard_type",
     "keyboard_hotkey",
     "get_cursor_position",
+    # Clipboard tools
+    "get_clipboard_text",
+    "set_clipboard_text",
+    "clear_clipboard",
 ]

@@ -11,6 +11,8 @@ from makima.tools.os.app_opener import (
 from makima.tools.os.apps import launch_app
 from makima.tools.os.notifications import show_desktop_notification
 from makima.tools.os.processes import (
+    find_process_by_port,
+    free_port,
     get_process_info,
     list_processes,
     terminate_process,
@@ -21,18 +23,22 @@ from makima.tools.os.windows import (
     list_open_windows,
     maximize_window,
     minimize_window,
+    snap_window,
 )
 
 __all__ = [
-    # Process tools
+    # Process & Network tools
     "list_processes",
     "get_process_info",
     "terminate_process",
+    "find_process_by_port",
+    "free_port",
     # Window tools
     "list_open_windows",
     "focus_window",
     "minimize_window",
     "maximize_window",
+    "snap_window",
     # Application tools
     "launch_app",
     "launch_application",

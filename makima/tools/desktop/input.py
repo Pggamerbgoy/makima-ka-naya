@@ -17,9 +17,7 @@ import win32con
 
 from makima.tools.registry import tool
 
-logger = logging.getLogger(__name__)
-
-user32 = ctypes.windll.user32
+user32 = getattr(ctypes, "windll", None).user32 if hasattr(ctypes, "windll") else None
 
 # ---------------------------------------------------------------------------
 # Win32 C Structure Definitions for SendInput
@@ -143,7 +141,7 @@ KEY_MAP: dict[str, int] = {
 
 def _send_inputs(inputs: list[INPUT]) -> int:
     """Dispatches a list of INPUT structures via user32.SendInput with mouse_event/keybd_event fallback."""
-    if not inputs:
+    if not inputs or not user32:
         return 0
     n = len(inputs)
     arr = (INPUT * n)(*inputs)
@@ -210,6 +208,8 @@ def _get_active_window_info(target_hwnd: Optional[int] = None) -> str:
 )
 def get_cursor_position() -> dict[str, int]:
     """Returns the current mouse cursor coordinates."""
+    if not user32:
+        return {"x": 0, "y": 0}
     pt = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(pt))
     return {"x": int(pt.x), "y": int(pt.y)}
