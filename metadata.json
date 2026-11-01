@@ -1,6 +1,10 @@
 {
-  "name": "Makima v2 - Autonomous Multi-Platform AI Studio",
-  "description": "Multi-agent autonomous AI command center with interactive Canvas artifacts, Pareto router, telemetry, and live voice control.",
+  "name": "Makima v2 - Autonomous AI Assistant",
+  "description": "Makima: Autonomous Desktop & Orchestration Assistant with 12 AI Agents, Pareto Router, Canvas Studio, Memory, and System Tools",
+  "requestFeedback": false,
+  "userFacing": true,
   "permissions": [],
-  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -1,28 +1,30 @@
 {
-  "name": "makima-v2-chat-ui",
+  "name": "makima-v2",
   "private": true,
   "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
-    "build": "tsc -b && vite build",
-    "lint": "tsc --noEmit",
-    "preview": "vite preview --host 0.0.0.0 --port 3000"
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 3000",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "dompurify": "^3.2.4",
+    "canvas-confetti": "^1.9.4",
+    "dompurify": "^3.4.17",
     "lucide-react": "^0.468.0",
-    "mermaid": "^11.4.1",
+    "mermaid": "^12.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-markdown": "^9.0.1",
-    "remark-gfm": "^4.0.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
     "@types/dompurify": "^3.0.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",

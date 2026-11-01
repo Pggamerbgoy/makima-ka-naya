@@ -71,7 +71,7 @@ function PluginLogo({
 
   if (activeImgSrc) {
     return (
-      <div className={`${className} rounded-xl bg-white/[0.04] p-1 border border-white/10 flex items-center justify-center shrink-0 shadow-sm overflow-hidden`}>
+      <div className={`${className} rounded-xl bg-[var(--panel-3)] p-1 border border-[var(--border)] flex items-center justify-center shrink-0 shadow-sm overflow-hidden`}>
         <img
           src={activeImgSrc}
           alt={name}
@@ -85,7 +85,7 @@ function PluginLogo({
 
   const displayEmoji = (icon && !isUrl) ? icon : '🧩';
   return (
-    <div className={`${className} rounded-xl bg-gradient-to-br from-violet-500/15 via-white/[0.03] to-purple-500/10 border border-violet-500/20 flex items-center justify-center shrink-0 shadow-sm text-lg select-none`}>
+    <div className={`${className} rounded-xl bg-gradient-to-br from-violet-500/15 via-[var(--panel-3)] to-purple-500/10 border border-violet-500/20 flex items-center justify-center shrink-0 shadow-sm text-lg select-none`}>
       {displayEmoji}
     </div>
   );
@@ -429,63 +429,63 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/60 backdrop-blur-md animate-fade-in"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-4xl max-h-[90vh] flex flex-col bg-[#121316] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        className="w-full max-w-4xl max-h-[90vh] flex flex-col bg-[var(--panel)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden text-[var(--text)]"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--panel-2)]">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400">
+            <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-500 dark:text-violet-400">
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-[var(--text)] tracking-tight flex items-center gap-2">
                 Makima Extensibility Hub
-                <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 font-mono">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300 font-mono border border-violet-500/20">
                   ChatGPT & MCP
                 </span>
               </h2>
-              <p className="text-xs text-white/50">
+              <p className="text-xs text-[var(--muted)]">
                 Connect websites, REST APIs, OpenAPI 3.0 specs, and Claude Desktop MCP servers
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-white/40 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+            className="p-2 text-[var(--muted)] hover:text-[var(--text)] rounded-lg hover:bg-[var(--panel-3)] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 px-6 pt-3 border-b border-white/5 bg-white/[0.01]">
+        <div className="flex items-center gap-1 px-6 pt-3 border-b border-[var(--border)] bg-[var(--panel-2)]/60">
           <button
             onClick={() => setActiveTab('connect')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-t-lg transition-all border-b-2 ${
               activeTab === 'connect'
-                ? 'border-violet-500 text-white bg-white/5'
-                : 'border-transparent text-white/50 hover:text-white/80'
+                ? 'border-violet-500 text-[var(--text)] bg-[var(--panel-3)] font-semibold'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
             }`}
           >
-            <Globe className="w-4 h-4 text-emerald-400" />
+            <Globe className="w-4 h-4 text-emerald-500" />
             Connect Website / OpenAPI
           </button>
           <button
             onClick={() => setActiveTab('installed')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-t-lg transition-all border-b-2 ${
               activeTab === 'installed'
-                ? 'border-violet-500 text-white bg-white/5'
-                : 'border-transparent text-white/50 hover:text-white/80'
+                ? 'border-violet-500 text-[var(--text)] bg-[var(--panel-3)] font-semibold'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
             }`}
           >
-            <Wrench className="w-4 h-4 text-violet-400" />
+            <Wrench className="w-4 h-4 text-violet-500" />
             Installed Extensions ({installed.length})
           </button>
           <button
@@ -495,36 +495,36 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
             }}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-t-lg transition-all border-b-2 ${
               activeTab === 'marketplace'
-                ? 'border-violet-500 text-white bg-white/5'
-                : 'border-transparent text-white/50 hover:text-white/80'
+                ? 'border-violet-500 text-[var(--text)] bg-[var(--panel-3)] font-semibold'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
             }`}
           >
-            <Store className="w-4 h-4 text-amber-400" />
+            <Store className="w-4 h-4 text-amber-500" />
             1-Click Marketplace ({catalog.length})
           </button>
           <button
             onClick={() => setActiveTab('claude')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-t-lg transition-all border-b-2 ${
               activeTab === 'claude'
-                ? 'border-violet-500 text-white bg-white/5'
-                : 'border-transparent text-white/50 hover:text-white/80'
+                ? 'border-violet-500 text-[var(--text)] bg-[var(--panel-3)] font-semibold'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
             }`}
           >
-            <Terminal className="w-4 h-4 text-sky-400" />
+            <Terminal className="w-4 h-4 text-sky-500" />
             Import Claude MCP
           </button>
         </div>
 
         {/* Feedback Messages */}
         {error && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs flex items-center gap-2 animate-fade-in">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-300 text-xs flex items-center gap-2 animate-fade-in">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
             <span>{error}</span>
           </div>
         )}
         {successMsg && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
-            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-xs flex items-center gap-2 animate-fade-in">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
             <span>{successMsg}</span>
           </div>
         )}
@@ -534,14 +534,14 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
           {/* TAB 1: CONNECT WEBSITE / OPENAPI */}
           {activeTab === 'connect' && (
             <div className="space-y-6">
-              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-4">
+              <div className="p-5 rounded-2xl bg-[var(--panel-2)] border border-[var(--border)] space-y-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <Globe className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-sm font-semibold text-[var(--text)] flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-emerald-500" />
                     Connect Website or REST API
                   </h3>
-                  <p className="text-xs text-white/50 mt-1">
-                    Enter any website domain (e.g. <code className="text-emerald-400">api.weather.gov</code>) or direct OpenAPI 3.0 URL. Makima probes manifests, auto-synthesizes endpoints, and injects authentication securely.
+                  <p className="text-xs text-[var(--muted)] mt-1">
+                    Enter any website domain (e.g. <code className="text-emerald-600 dark:text-emerald-400 font-mono">api.weather.gov</code>) or direct OpenAPI 3.0 URL. Makima probes manifests, auto-synthesizes endpoints, and injects authentication securely.
                   </p>
                 </div>
 
@@ -553,7 +553,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                       value={targetUrl}
                       onChange={(e) => setTargetUrl(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleDiscover()}
-                      className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-white/30 text-xs focus:outline-none focus:border-violet-500 transition-colors"
+                      className="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-[var(--panel-3)] border border-slate-300 dark:border-[var(--border)] text-slate-900 dark:text-[var(--text)] placeholder:text-slate-400 dark:placeholder:text-[var(--muted)]/60 text-xs focus:outline-none focus:border-indigo-500 shadow-sm transition-colors"
                     />
                   </div>
                   <Button
@@ -566,25 +566,25 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                   </Button>
                 </div>
 
-                <div className="flex items-center gap-2 text-[11px] text-white/40">
+                <div className="flex items-center gap-2 text-[11px] text-[var(--muted)]">
                   <span>Popular quick links:</span>
                   <button
                     onClick={() => setTargetUrl('api.weather.gov')}
-                    className="text-violet-400 hover:underline"
+                    className="text-violet-600 dark:text-violet-400 hover:underline"
                   >
                     Weather.gov
                   </button>
                   <span>•</span>
                   <button
                     onClick={() => setTargetUrl('https://petstore.swagger.io/v2/swagger.json')}
-                    className="text-violet-400 hover:underline"
+                    className="text-violet-600 dark:text-violet-400 hover:underline"
                   >
                     Swagger Petstore
                   </button>
                   <span>•</span>
                   <button
                     onClick={() => setTargetUrl('https://api.github.com')}
-                    className="text-violet-400 hover:underline"
+                    className="text-violet-600 dark:text-violet-400 hover:underline"
                   >
                     GitHub REST
                   </button>
@@ -593,7 +593,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
 
               {/* Discovery Result Preview */}
               {discoveryResult && (
-                <div className="p-5 rounded-2xl bg-emerald-500/[0.03] border border-emerald-500/20 space-y-4 animate-fade-in">
+                <div className="p-5 rounded-2xl bg-emerald-500/[0.04] border border-emerald-500/20 space-y-4 animate-fade-in">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="flex items-center gap-2.5">
@@ -603,14 +603,14 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                           name={discoveryResult.name}
                           className="w-8 h-8"
                         />
-                        <h4 className="text-sm font-semibold text-white">{discoveryResult.name}</h4>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
+                        <h4 className="text-sm font-semibold text-[var(--text)]">{discoveryResult.name}</h4>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 font-mono">
                           {discoveryResult.plugin_type === 'chatgpt_plugin' ? 'ChatGPT Plugin' : 'OpenAPI 3.0'}
                         </span>
                       </div>
-                      <p className="text-xs text-white/60 mt-1">{discoveryResult.description || 'No description provided.'}</p>
+                      <p className="text-xs text-[var(--muted)] mt-1">{discoveryResult.description || 'No description provided.'}</p>
                     </div>
-                    <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-white/5 text-white/80 border border-white/5">
+                    <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-[var(--panel-3)] text-[var(--text)] border border-[var(--border)]">
                       {discoveryResult.endpoints_count} endpoints found
                     </span>
                   </div>
@@ -618,18 +618,18 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                   {/* Endpoints Pills */}
                   {discoveryResult.endpoints.length > 0 && (
                     <div>
-                      <label className="text-[11px] font-medium text-white/50 block mb-1.5">
+                      <label className="text-[11px] font-medium text-[var(--muted)] block mb-1.5">
                         Detected Callable Operations:
                       </label>
-                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 rounded-xl bg-black/40 border border-white/5">
+                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 rounded-xl bg-[var(--panel-3)] border border-[var(--border)]">
                         {discoveryResult.endpoints.slice(0, 15).map((ep, i) => (
                           <span
                             key={i}
-                            className="text-[10px] font-mono px-2 py-1 rounded-md bg-white/5 text-white/70 flex items-center gap-1 border border-white/5"
+                            className="text-[10px] font-mono px-2 py-1 rounded-md bg-[var(--panel-2)] text-[var(--text)] flex items-center gap-1 border border-[var(--border)]"
                           >
                             <span
                               className={`font-bold ${
-                                ep.method === 'GET' ? 'text-emerald-400' : 'text-sky-400'
+                                ep.method === 'GET' ? 'text-emerald-600 dark:text-emerald-400' : 'text-sky-600 dark:text-sky-400'
                               }`}
                             >
                               {ep.method}
@@ -638,7 +638,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                           </span>
                         ))}
                         {discoveryResult.endpoints.length > 15 && (
-                          <span className="text-[10px] text-white/40 self-center px-1">
+                          <span className="text-[10px] text-[var(--muted)] self-center px-1">
                             +{discoveryResult.endpoints.length - 15} more
                           </span>
                         )}
@@ -647,14 +647,14 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                   )}
 
                   {/* Authentication Configuration */}
-                  <div className="pt-2 border-t border-white/5 space-y-3">
-                    <label className="text-xs font-medium text-white flex items-center gap-1.5">
-                      <Key className="w-3.5 h-3.5 text-amber-400" />
+                  <div className="pt-2 border-t border-[var(--border)] space-y-3">
+                    <label className="text-xs font-medium text-[var(--text)] flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-500" />
                       Authentication Method
                     </label>
 
                     <div className="flex gap-4">
-                      <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                      <label className="flex items-center gap-2 text-xs text-[var(--text)] cursor-pointer">
                         <input
                           type="radio"
                           name="authType"
@@ -665,7 +665,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                         />
                         None (Public API)
                       </label>
-                      <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                      <label className="flex items-center gap-2 text-xs text-[var(--text)] cursor-pointer">
                         <input
                           type="radio"
                           name="authType"
@@ -676,7 +676,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                         />
                         Bearer Token
                       </label>
-                      <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                      <label className="flex items-center gap-2 text-xs text-[var(--text)] cursor-pointer">
                         <input
                           type="radio"
                           name="authType"
@@ -693,30 +693,30 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 animate-fade-in">
                         {authType === 'api_key' && (
                           <div>
-                            <label className="text-[11px] text-white/50 block mb-1">Header Name</label>
+                            <label className="text-[11px] text-[var(--muted)] block mb-1">Header Name</label>
                             <input
                               type="text"
                               value={headerNameInput}
                               onChange={(e) => setHeaderNameInput(e.target.value)}
                               placeholder="e.g. X-API-KEY or Authorization"
-                              className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs"
+                              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[var(--panel-3)] border border-slate-300 dark:border-[var(--border)] text-slate-900 dark:text-[var(--text)] text-xs"
                             />
                           </div>
                         )}
                         <div className={authType === 'api_key' ? '' : 'col-span-2'}>
-                          <label className="text-[11px] text-white/50 block mb-1">Token or Secret Key</label>
+                          <label className="text-[11px] text-[var(--muted)] block mb-1">Token or Secret Key</label>
                           <div className="relative">
                             <input
                               type={showToken ? 'text' : 'password'}
                               value={tokenInput}
                               onChange={(e) => setTokenInput(e.target.value)}
                               placeholder="Enter API key or personal access token"
-                              className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs pr-10"
+                              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[var(--panel-3)] border border-slate-300 dark:border-[var(--border)] text-slate-900 dark:text-[var(--text)] text-xs pr-10"
                             />
                             <button
                               type="button"
                               onClick={() => setShowToken(!showToken)}
-                              className="absolute right-3 top-2.5 text-white/40 hover:text-white"
+                              className="absolute right-3 top-2.5 text-[var(--muted)] hover:text-[var(--text)]"
                             >
                               {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
@@ -745,12 +745,12 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
           {activeTab === 'installed' && (
             <div className="space-y-4">
               {installed.length === 0 ? (
-                <div className="text-center py-12 border border-dashed border-white/10 rounded-2xl space-y-3">
-                  <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto text-white/40">
+                <div className="text-center py-12 border border-dashed border-[var(--border)] rounded-2xl space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-[var(--panel-3)] flex items-center justify-center mx-auto text-[var(--muted)]">
                     <Wrench className="w-6 h-6" />
                   </div>
-                  <h4 className="text-sm font-medium text-white">No custom plugins installed yet</h4>
-                  <p className="text-xs text-white/40 max-w-sm mx-auto">
+                  <h4 className="text-sm font-medium text-[var(--text)]">No custom plugins installed yet</h4>
+                  <p className="text-xs text-[var(--muted)] max-w-sm mx-auto">
                     Connect any website API from the first tab or install free pre-configured tools from the Marketplace!
                   </p>
                   <Button
@@ -765,7 +765,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                   {installed.map((plugin) => (
                     <div
                       key={plugin.id}
-                      className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-white/10 transition-colors space-y-3"
+                      className="p-4 rounded-2xl bg-[var(--panel-2)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-colors space-y-3"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex items-start gap-3">
@@ -778,25 +778,25 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                           />
                           <div>
                             <div className="flex items-center gap-2">
-                              <h4 className="text-sm font-semibold text-white">{plugin.name}</h4>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-white/60 font-mono">
+                              <h4 className="text-sm font-semibold text-[var(--text)]">{plugin.name}</h4>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--panel-3)] text-[var(--muted)] font-mono border border-[var(--border)]">
                                 {plugin.kind}
                               </span>
                               {plugin.auth_type !== 'none' && (
                                 <span
                                   className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${
                                     plugin.auth_configured
-                                      ? 'bg-emerald-500/10 text-emerald-300'
-                                      : 'bg-amber-500/10 text-amber-300'
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
                                   }`}
                                 >
                                   {plugin.auth_configured ? 'Key Configured' : 'Needs Key'}
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-white/50 mt-1">{plugin.description || 'No description'}</p>
-                            <div className="flex items-center gap-3 mt-2 text-[11px] text-white/40">
-                              <span>Tools: <b className="text-white/80">{plugin.tools_count}</b> active</span>
+                            <p className="text-xs text-[var(--muted)] mt-1">{plugin.description || 'No description'}</p>
+                            <div className="flex items-center gap-3 mt-2 text-[11px] text-[var(--muted)]">
+                              <span>Tools: <b className="text-[var(--text)]">{plugin.tools_count}</b> active</span>
                               {plugin.base_url && <span>Host: {plugin.base_url}</span>}
                             </div>
                           </div>
@@ -813,14 +813,14 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                               setConfiguringPluginId(configuringPluginId === plugin.id ? null : plugin.id);
                               setEditToken('');
                             }}
-                            className="p-2 text-white/50 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                            className="p-2 text-[var(--muted)] hover:text-[var(--text)] rounded-lg hover:bg-[var(--panel-3)] transition-colors"
                             title="Configure Credentials"
                           >
                             <Key className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => handleUninstall(plugin.id)}
-                            className="p-2 text-red-400/60 hover:text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
+                            className="p-2 text-red-500 hover:text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
                             title="Uninstall Plugin"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -830,14 +830,14 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
 
                       {/* Expandable Key Configuration Drawer */}
                       {configuringPluginId === plugin.id && (
-                        <div className="pt-3 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 gap-2 animate-fade-in">
+                        <div className="pt-3 border-t border-[var(--border)] grid grid-cols-1 md:grid-cols-3 gap-2 animate-fade-in">
                           <div className="md:col-span-2">
                             <input
                               type="password"
                               placeholder="New API Key or Token"
                               value={editToken}
                               onChange={(e) => setEditToken(e.target.value)}
-                              className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs"
+                              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[var(--panel-3)] border border-slate-300 dark:border-[var(--border)] text-slate-900 dark:text-[var(--text)] text-xs"
                             />
                           </div>
                           <Button
@@ -862,12 +862,12 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
             <ErrorBoundary name="Marketplace Tab">
               <div className="space-y-4">
                 {/* Marketplace Registry Source Selector (IDE-Style) */}
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-violet-500/[0.06] via-purple-500/[0.03] to-transparent border border-violet-500/15 space-y-2.5">
+              <div className="p-3.5 rounded-2xl bg-[var(--panel-2)] border border-[var(--border)] space-y-2.5">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
-                    <Store className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-semibold text-white">Marketplace Registry Source:</span>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full font-mono bg-white/5 text-violet-300 border border-white/10 truncate max-w-[260px]">
+                    <Store className="w-4 h-4 text-amber-500" />
+                    <span className="text-xs font-semibold text-[var(--text)]">Marketplace Registry Source:</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full font-mono bg-[var(--panel-3)] text-violet-600 dark:text-violet-300 border border-[var(--border)] truncate max-w-[260px]">
                       {registryUrl ? registryUrl : 'Official Curated Feed'}
                     </span>
                   </div>
@@ -877,7 +877,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                       className={`text-[11px] px-2.5 py-1 rounded-lg transition-colors ${
                         !registryUrl
                           ? 'bg-violet-600 text-white font-medium shadow-sm'
-                          : 'bg-white/5 text-white/60 hover:text-white'
+                          : 'bg-[var(--panel-3)] text-[var(--muted)] hover:text-[var(--text)]'
                       }`}
                       title="Use official curated tools"
                     >
@@ -890,7 +890,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                       className={`text-[11px] px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 ${
                         registryUrl || showCustomRegistry
                           ? 'bg-violet-600 text-white font-medium shadow-sm'
-                          : 'bg-white/5 text-white/60 hover:text-white'
+                          : 'bg-[var(--panel-3)] text-[var(--muted)] hover:text-[var(--text)]'
                       }`}
                       title="Connect custom registry URL or feed"
                     >
@@ -910,7 +910,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                           value={registryInput}
                           onChange={(e) => setRegistryInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleApplyRegistry(registryInput)}
-                          className="w-full px-3 py-1.5 rounded-xl bg-black/50 border border-white/10 text-white placeholder-white/30 text-xs focus:outline-none focus:border-violet-500 font-mono transition-colors"
+                          className="w-full px-3 py-1.5 rounded-xl bg-[var(--panel-3)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--muted)]/60 text-xs focus:outline-none focus:border-violet-500 font-mono transition-colors"
                         />
                       </div>
                       <Button
@@ -926,7 +926,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                             setShowCustomRegistry(false);
                             handleApplyRegistry('');
                           }}
-                          className="text-[11px] px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors shrink-0"
+                          className="text-[11px] px-2.5 py-1.5 rounded-xl bg-[var(--panel-3)] hover:bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] transition-colors shrink-0 border border-[var(--border)]"
                         >
                           Reset
                         </button>
@@ -935,7 +935,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
 
                     {/* Popular Online Registry Preset */}
                     <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-                      <span className="text-white/40">Presets:</span>
+                      <span className="text-[var(--muted)]">Presets:</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -943,7 +943,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                           setRegistryInput(url);
                           handleApplyRegistry(url);
                         }}
-                        className="px-2 py-0.5 rounded-md bg-white/5 hover:bg-violet-500/20 text-sky-300 hover:text-white border border-white/5 transition-colors font-mono"
+                        className="px-2 py-0.5 rounded-md bg-[var(--panel-3)] hover:bg-violet-500/20 text-sky-600 dark:text-sky-300 hover:text-[var(--text)] border border-[var(--border)] transition-colors font-mono"
                         title="Official Global Model Context Protocol Registry"
                       >
                         🌐 Official MCP Global Registry
@@ -951,13 +951,13 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                     </div>
 
                     {/* External Marketplaces Links */}
-                    <div className="flex items-center gap-2 pt-1 border-t border-white/5 text-[11px] text-white/40 flex-wrap">
+                    <div className="flex items-center gap-2 pt-1 border-t border-[var(--border)] text-[11px] text-[var(--muted)] flex-wrap">
                       <span>Explore Public Hubs:</span>
                       <a
                         href="https://smithery.ai"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-violet-400 hover:text-violet-300 hover:underline flex items-center gap-0.5"
+                        className="text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-0.5"
                       >
                         Smithery.ai <ExternalLink className="w-2.5 h-2.5" />
                       </a>
@@ -966,7 +966,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                         href="https://glama.ai/mcp/servers"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-violet-400 hover:text-violet-300 hover:underline flex items-center gap-0.5"
+                        className="text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-0.5"
                       >
                         Glama.ai <ExternalLink className="w-2.5 h-2.5" />
                       </a>
@@ -975,7 +975,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                         href="https://github.com/modelcontextprotocol/servers"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-violet-400 hover:text-violet-300 hover:underline flex items-center gap-0.5"
+                        className="text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-0.5"
                       >
                         Anthropic MCP <ExternalLink className="w-2.5 h-2.5" />
                       </a>
@@ -985,20 +985,20 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
               </div>
 
               {/* Marketplace Search & Action Header */}
-              <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/[0.02] border border-white/5">
+              <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-[var(--panel-2)] border border-[var(--border)]">
                 <div className="relative flex-1">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-white/40" />
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-[var(--muted)]" />
                   <input
                     type="text"
                     placeholder="Search tools by name, category, or keyword..."
                     value={marketSearch}
                     onChange={(e) => setMarketSearch(e.target.value)}
-                    className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-white placeholder-white/30 text-xs focus:outline-none focus:border-violet-500 transition-colors"
+                    className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white dark:bg-[var(--panel-3)] border border-slate-300 dark:border-[var(--border)] text-slate-900 dark:text-[var(--text)] placeholder:text-slate-400 dark:placeholder:text-[var(--muted)]/60 text-xs focus:outline-none focus:border-indigo-500 shadow-sm transition-colors"
                   />
                   {marketSearch && (
                     <button
                       onClick={() => setMarketSearch('')}
-                      className="absolute right-2.5 top-2 text-white/40 hover:text-white"
+                      className="absolute right-2.5 top-2 text-[var(--muted)] hover:text-[var(--text)]"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -1007,7 +1007,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                 <button
                   onClick={() => loadData()}
                   disabled={loading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white text-xs border border-white/10 transition-colors shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--panel-3)] hover:bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] text-xs border border-[var(--border)] transition-colors shrink-0"
                   title="Refresh marketplace catalog from server"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-violet-400' : ''}`} />
@@ -1019,7 +1019,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
               {loading && catalog.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 space-y-3">
                   <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
-                  <p className="text-xs text-white/50">Loading curated marketplace tools...</p>
+                  <p className="text-xs text-[var(--muted)]">Loading curated marketplace tools...</p>
                 </div>
               ) : null}
 
@@ -1041,14 +1041,14 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
 
                 if (filtered.length === 0) {
                   return (
-                    <div className="text-center py-12 border border-dashed border-white/10 rounded-2xl space-y-3">
-                      <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto text-white/40">
+                    <div className="text-center py-12 border border-dashed border-[var(--border)] rounded-2xl space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-[var(--panel-3)] flex items-center justify-center mx-auto text-[var(--muted)]">
                         <Store className="w-6 h-6" />
                       </div>
-                      <h4 className="text-sm font-medium text-white">
+                      <h4 className="text-sm font-medium text-[var(--text)]">
                         {catalog.length === 0 ? 'No marketplace extensions found' : 'No tools match your search'}
                       </h4>
-                      <p className="text-xs text-white/40 max-w-sm mx-auto">
+                      <p className="text-xs text-[var(--muted)] max-w-sm mx-auto">
                         {catalog.length === 0
                           ? 'Could not connect to the catalog API. Click below to retry.'
                           : `No tools found matching "${marketSearch}". Try searching something else.`}
@@ -1064,7 +1064,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                       ) : (
                         <Button
                           onClick={() => setMarketSearch('')}
-                          className="text-xs px-4 py-2 bg-white/10 text-white rounded-xl"
+                          className="text-xs px-4 py-2 bg-[var(--panel-3)] text-[var(--text)] rounded-xl border border-[var(--border)]"
                         >
                           Clear Search Filter
                         </Button>
@@ -1088,7 +1088,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                       return (
                         <div
                           key={uniqueKey}
-                          className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all flex flex-col justify-between space-y-3"
+                          className="p-4 rounded-2xl bg-[var(--panel-2)] border border-[var(--border)] hover:border-[var(--border-hover)] transition-all flex flex-col justify-between space-y-3"
                         >
                           <div>
                             <div className="flex items-center justify-between">
@@ -1098,19 +1098,19 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                                 baseUrl={item.base_url}
                                 name={itemName}
                               />
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/5 text-white/50 border border-white/5">
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[var(--panel-3)] text-[var(--muted)] border border-[var(--border)]">
                                 {itemCategory}
                               </span>
                             </div>
-                            <h4 className="text-sm font-semibold text-white mt-2">{itemName}</h4>
-                            <p className="text-xs text-white/50 mt-1 line-clamp-2">{itemDesc}</p>
+                            <h4 className="text-sm font-semibold text-[var(--text)] mt-2">{itemName}</h4>
+                            <p className="text-xs text-[var(--muted)] mt-1 line-clamp-2">{itemDesc}</p>
                             {linkUrl && (
                               <div className="flex items-center gap-2 mt-2 pt-1">
                                 <a
                                   href={linkUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-[11px] text-violet-400 hover:text-violet-300 hover:underline font-mono"
+                                  className="inline-flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400 hover:underline font-mono"
                                   title="Open documentation / homepage"
                                 >
                                   <span>{linkUrl.replace(/^https?:\/\//, '')}</span>
@@ -1120,12 +1120,12 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                             )}
                           </div>
 
-                          <div className="pt-2 border-t border-white/5 flex items-center justify-between">
-                            <span className="text-[11px] text-white/40">
+                          <div className="pt-2 border-t border-[var(--border)] flex items-center justify-between">
+                            <span className="text-[11px] text-[var(--muted)]">
                               {item.auth_type === 'none' ? 'Free • No Key' : 'Requires API Key'}
                             </span>
                             {isInstalled ? (
-                              <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium px-3 py-1.5 rounded-lg bg-emerald-500/10">
+                              <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium px-3 py-1.5 rounded-lg bg-emerald-500/10">
                                 <Check className="w-3.5 h-3.5" /> Installed
                               </span>
                             ) : (
@@ -1156,13 +1156,13 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
           {/* TAB 4: IMPORT CLAUDE MCP */}
           {activeTab === 'claude' && (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-sky-400" />
+              <div className="p-4 rounded-2xl bg-[var(--panel-2)] border border-[var(--border)] space-y-2">
+                <h3 className="text-sm font-semibold text-[var(--text)] flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-sky-500" />
                   Import Claude Desktop Configuration
                 </h3>
-                <p className="text-xs text-white/50">
-                  If you already use Claude Desktop, paste the contents of your <code className="text-sky-300">claude_desktop_config.json</code> below. Makima will automatically convert all declared MCP servers (e.g. SQLite, GitHub, Filesystem) into native Makima tools!
+                <p className="text-xs text-[var(--muted)]">
+                  If you already use Claude Desktop, paste the contents of your <code className="text-sky-600 dark:text-sky-300 font-mono">claude_desktop_config.json</code> below. Makima will automatically convert all declared MCP servers (e.g. SQLite, GitHub, Filesystem) into native Makima tools!
                 </p>
               </div>
 
@@ -1171,7 +1171,7 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
                   rows={10}
                   value={claudeJsonInput}
                   onChange={(e) => setClaudeJsonInput(e.target.value)}
-                  className="w-full font-mono text-xs p-4 rounded-2xl bg-black/50 border border-white/10 text-emerald-400 focus:outline-none focus:border-violet-500 transition-colors"
+                  className="w-full font-mono text-xs p-4 rounded-2xl bg-slate-50 dark:bg-[var(--panel-3)] border border-slate-300 dark:border-[var(--border)] text-slate-800 dark:text-emerald-400 focus:outline-none focus:border-indigo-500 shadow-sm transition-colors"
                 />
               </div>
 
@@ -1190,9 +1190,9 @@ export function PluginsModal({ isOpen, onClose, onToolsUpdated }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-white/10 bg-white/[0.01] flex items-center justify-between text-xs text-white/40">
+        <div className="px-6 py-3 border-t border-[var(--border)] bg-[var(--panel-2)] flex items-center justify-between text-xs text-[var(--muted)]">
           <span>Zero-Leak Guarantee: Credentials remain server-side in ~/.makima/plugins/.secrets.json</span>
-          <Button onClick={onClose} className="px-4 py-1.5 bg-white/5 hover:bg-white/10 text-white rounded-lg">
+          <Button onClick={onClose} className="px-4 py-1.5 bg-[var(--panel-3)] hover:bg-[var(--panel)] text-[var(--text)] border border-[var(--border)] rounded-lg">
             Done
           </Button>
         </div>

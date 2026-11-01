@@ -4,12 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#131314" />
-    <title>Makima v2 - Autonomous Multi-Platform AI Studio</title>
-    <meta name="description" content="Multi-agent autonomous AI command center with interactive Canvas artifacts, Pareto router, telemetry, and live voice control." />
-    <meta property="og:title" content="Makima v2 - Autonomous Multi-Platform AI Studio" />
-    <meta property="og:description" content="Multi-agent autonomous AI command center with interactive Canvas artifacts, Pareto router, telemetry, and live voice control." />
+    <title>Makima v2 - Autonomous AI Assistant</title>
+    <meta name="description" content="Makima: Autonomous Desktop & Orchestration Assistant with 12 AI Agents, Pareto Router, Canvas Studio, Memory, and System Tools" />
+    <meta property="og:title" content="Makima v2 - Autonomous AI Assistant" />
+    <meta property="og:description" content="Makima: Autonomous Desktop & Orchestration Assistant with 12 AI Agents, Pareto Router, Canvas Studio, Memory, and System Tools" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          var _f = window.fetch ? window.fetch.bind(window) : undefined;
+          Object.defineProperty(window, 'fetch', {
+            get: function() { return _f; },
+            set: function(v) { _f = v; },
+            configurable: true,
+            enumerable: true
+          });
+          var proto = Object.getPrototypeOf(window);
+          if (proto) {
+            Object.defineProperty(proto, 'fetch', {
+              get: function() { return _f; },
+              set: function(v) { _f = v; },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body>
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

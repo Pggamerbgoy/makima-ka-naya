@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Activity, AudioLines, Check, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, Image as ImageIcon, LayoutDashboard, Maximize2, PanelRight, RefreshCw, Table2, Video } from 'lucide-react';
+import { Activity, AudioLines, Check, Code2, Copy, Download, ExternalLink, Eye, EyeOff, FileJson, FileText, Image as ImageIcon, LayoutDashboard, Maximize2, Minimize2, PanelRight, RefreshCw, Table2, Video, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Artifact } from '../types';
 import { artifactFileName, downloadArtifact, safeArtifactUrl, sanitizeArtifactHtml } from '../artifacts';
 import { Button, EmptyState } from './ui';
@@ -58,13 +58,20 @@ const ChartCard = memo(function ChartCard({ artifact, onCanvas, onFullscreen }: 
 });
 
 const MermaidCard = memo(function MermaidCard({ artifact, onCanvas, onFullscreen }: { artifact: Artifact; onCanvas: (artifact: Artifact) => void; onFullscreen?: (artifact: Artifact) => void }) {
-  const [svg, setSvg] = useState(''); const [error, setError] = useState(''); const [source, setSource] = useState(false); const [attempt, setAttempt] = useState(0);
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+  const [source, setSource] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [isExpanded, setIsExpanded] = useState(false);
+
   useEffect(() => {
     let active = true;
     setError('');
     setSvg('');
     import('mermaid').then(async ({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' });
+      const isLight = document.documentElement.dataset.theme === 'light';
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: isLight ? 'default' : 'dark' });
       try {
         const result = await mermaid.render(`makima_${artifact.id.replace(/\W/g, '')}_${attempt}`, artifact.content ?? '');
         if (active) setSvg(result.svg);
@@ -74,14 +81,125 @@ const MermaidCard = memo(function MermaidCard({ artifact, onCanvas, onFullscreen
     });
     return () => { active = false; };
   }, [artifact.id, artifact.content, attempt]);
-  return <section className="artifact-card"><header><span><LayoutDashboard size={15} /> {artifact.title ?? 'Diagram'}</span><div className="artifact-actions"><Button onClick={() => setSource((value) => !value)}>{source ? 'Preview' : 'Source'}</Button><ArtifactActions artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} /></div></header>{source ? <pre className="source-box">{artifact.content}</pre> : error ? <div className="artifact-error"><strong>Diagram syntax error</strong><small>{error}</small><Button onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={13} /> Retry</Button></div> : <div className="diagram" dangerouslySetInnerHTML={{ __html: sanitizeArtifactHtml(svg, 'svg') }} />}</section>;
+
+  const handleZoomIn = () => setZoom((prev) => Math.min(2.5, +(prev + 0.25).toFixed(2)));
+  const handleZoomOut = () => setZoom((prev) => Math.max(0.5, +(prev - 0.25).toFixed(2)));
+  const handleResetZoom = () => setZoom(1);
+
+  return (
+    <section className={`artifact-card ${isExpanded ? 'artifact-card-expanded' : ''}`}>
+      <header>
+        <span><LayoutDashboard size={15} /> {artifact.title ?? 'Diagram'}</span>
+        <div className="artifact-actions">
+          <Button
+            title={isExpanded ? 'Collapse to standard frame' : 'Expand full unconstrained frame'}
+            aria-label={isExpanded ? 'Collapse frame' : 'Expand frame'}
+            onClick={() => setIsExpanded((prev) => !prev)}
+          >
+            {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <span>{isExpanded ? 'Fit' : 'Expand'}</span>
+          </Button>
+          {!source && !error && (
+            <>
+              <Button title="Zoom out" aria-label="Zoom out" onClick={handleZoomOut} disabled={zoom <= 0.5}>
+                <ZoomOut size={13} />
+              </Button>
+              <Button title="Reset zoom" aria-label="Reset zoom" onClick={handleResetZoom}>
+                <span style={{ fontSize: '10px', minWidth: '28px', textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+              </Button>
+              <Button title="Zoom in" aria-label="Zoom in" onClick={handleZoomIn} disabled={zoom >= 2.5}>
+                <ZoomIn size={13} />
+              </Button>
+            </>
+          )}
+          <Button onClick={() => setSource((value) => !value)}>{source ? 'Preview' : 'Source'}</Button>
+          <ArtifactActions artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />
+        </div>
+      </header>
+      {source ? (
+        <pre className="source-box">{artifact.content}</pre>
+      ) : error ? (
+        <div className="artifact-error">
+          <strong>Diagram syntax error</strong>
+          <small>{error}</small>
+          <Button onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={13} /> Retry</Button>
+        </div>
+      ) : (
+        <div
+          className={`diagram ${isExpanded ? 'expanded' : ''}`}
+          style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined, transformOrigin: 'top center', transition: 'transform 120ms ease' }}
+          dangerouslySetInnerHTML={{ __html: sanitizeArtifactHtml(svg, 'svg') }}
+        />
+      )}
+    </section>
+  );
 });
 
 const MediaCard = memo(function MediaCard({ artifact, onCanvas, onFullscreen }: { artifact: Artifact; onCanvas: (artifact: Artifact) => void; onFullscreen?: (artifact: Artifact) => void }) {
   const [failed, setFailed] = useState(false);
+  const [frameMode, setFrameMode] = useState<'fit' | 'expanded' | 'theater'>('fit');
   const src = useMemo(() => safeArtifactUrl(artifact.url ?? artifact.content, artifact.kind), [artifact.url, artifact.content, artifact.kind]);
   const unavailable = !src || failed;
-  return <section className="artifact-card media-card"><header><span>{artifact.kind === 'image' ? <ImageIcon size={15} /> : artifact.kind === 'video' ? <Video size={15} /> : <AudioLines size={15} />} {artifact.title ?? artifact.kind}</span><ArtifactActions artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} /></header><div className={`media-stage ${unavailable ? 'failed' : ''}`}>{unavailable ? <EmptyState text={failed ? 'Media failed to load' : 'Media URL is blocked for safety'} action={failed ? <Button onClick={() => setFailed(false)}><RefreshCw size={13} /> Retry</Button> : undefined} /> : artifact.kind === 'image' ? <img src={src} alt={String(artifact.metadata?.alt ?? artifact.title ?? 'Makima image')} onError={() => setFailed(true)} /> : artifact.kind === 'video' ? <video src={src} controls onError={() => setFailed(true)} /> : <audio src={src} controls onError={() => setFailed(true)} />}</div></section>;
+
+  const cycleFrameMode = () => {
+    setFrameMode((current) => {
+      if (current === 'fit') return 'expanded';
+      if (current === 'expanded') return 'theater';
+      return 'fit';
+    });
+  };
+
+  return (
+    <section className={`artifact-card media-card ${frameMode !== 'fit' ? `mode-${frameMode}` : ''}`}>
+      <header>
+        <span>
+          {artifact.kind === 'image' ? <ImageIcon size={15} /> : artifact.kind === 'video' ? <Video size={15} /> : <AudioLines size={15} />}
+          {' '}{artifact.title ?? artifact.kind}
+        </span>
+        <div className="artifact-actions">
+          {!unavailable && (artifact.kind === 'image' || artifact.kind === 'video') && (
+            <Button
+              title={`Toggle frame size (Current: ${frameMode})`}
+              aria-label="Toggle frame size"
+              onClick={cycleFrameMode}
+              style={{ fontSize: '10px', textTransform: 'capitalize' }}
+            >
+              {frameMode === 'theater' ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              <span>{frameMode === 'fit' ? 'Expand Frame' : frameMode === 'expanded' ? 'Theater View' : 'Compact Frame'}</span>
+            </Button>
+          )}
+          <ArtifactActions artifact={artifact} onCanvas={onCanvas} onFullscreen={onFullscreen} />
+        </div>
+      </header>
+      <div className={`media-stage ${unavailable ? 'failed' : ''} frame-${frameMode}`}>
+        {unavailable ? (
+          <EmptyState
+            text={failed ? 'Media failed to load' : 'Media URL is blocked for safety'}
+            action={failed ? <Button onClick={() => setFailed(false)}><RefreshCw size={13} /> Retry</Button> : undefined}
+          />
+        ) : artifact.kind === 'image' ? (
+          <img
+            src={src}
+            alt={String(artifact.metadata?.alt ?? artifact.title ?? 'Makima image')}
+            onError={() => setFailed(true)}
+            className={`media-img-responsive ${frameMode}`}
+            title="Click to toggle frame expansion"
+            onClick={cycleFrameMode}
+            style={{ cursor: 'zoom-in' }}
+          />
+        ) : artifact.kind === 'video' ? (
+          <video
+            src={src}
+            controls
+            onError={() => setFailed(true)}
+            className={`media-video-responsive ${frameMode}`}
+          />
+        ) : (
+          <audio src={src} controls onError={() => setFailed(true)} />
+        )}
+      </div>
+    </section>
+  );
 });
 
 const DocumentCard = memo(function DocumentCard({

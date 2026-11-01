@@ -313,8 +313,8 @@ function ExecutionStepsAccordion({
     return (
       <div className="execution-steps-live" aria-label="Makima execution progress">
         <div className="thinking-header">
-          <div className="aurora-pulse">
-            <Sparkles size={13} className="aurora-sparkle" />
+          <div className="live-stage-badge">
+            <span className="live-stage-dot" />
             <span>{currentStage || (awaitingStep ? `Waiting for permission: ${awaitingStep.name || 'action'}…` : uniqueTools.length ? `Executing ${uniqueTools[uniqueTools.length - 1]}…` : 'Makima is reasoning…')}</span>
           </div>
           {onStop && (

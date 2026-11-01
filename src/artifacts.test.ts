@@ -1,12 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
 import { detectArtifacts, normalizeArtifact, safeArtifactUrl } from './artifacts';
 
 describe('artifact normalization', () => {
   it('normalizes typed backend artifacts with safe defaults', () => {
     const artifact = normalizeArtifact({ kind: 'code', content: 'print(1)', language: 'python' });
-    expect(artifact.kind).toBe('code');
-    expect(artifact.downloadable).toBe(true);
-    expect(artifact.id).toMatch(/^artifact_/);
+    assert.equal(artifact.kind, 'code');
+    assert.equal(artifact.downloadable, true);
+    assert.match(artifact.id, /^artifact_/);
   });
 
   it('detects code, Mermaid, and Markdown tables from plain text', () => {
@@ -15,30 +16,30 @@ describe('artifact normalization', () => {
       '```python', 'print("ok")', '```', '', '```mermaid', 'graph TD; A-->B', '```',
     ].join('\n');
     const artifacts = detectArtifacts(plain);
-    expect(artifacts.map((item) => item.kind)).toEqual(['code', 'diagram', 'table']);
+    assert.deepEqual(artifacts.map((item) => item.kind), ['code', 'diagram', 'table']);
   });
 
   it('allows only local or secure artifact URLs', () => {
-    expect(safeArtifactUrl('https://cdn.example.test/image.png', 'image')).toBe('https://cdn.example.test/image.png');
-    expect(safeArtifactUrl('http://localhost:8000/file.png', 'image')).toBe('http://localhost:8000/file.png');
-    expect(safeArtifactUrl('http://evil.example.test/file.png', 'image')).toBeUndefined();
-    expect(safeArtifactUrl('javascript:alert(1)', 'html')).toBeUndefined();
-    expect(safeArtifactUrl('data:text/html,<script>alert(1)</script>', 'html')).toBeUndefined();
-    expect(safeArtifactUrl('data:image/png;base64,AAAA', 'image')).toBe('data:image/png;base64,AAAA');
+    assert.equal(safeArtifactUrl('https://cdn.example.test/image.png', 'image'), 'https://cdn.example.test/image.png');
+    assert.equal(safeArtifactUrl('http://localhost:8000/file.png', 'image'), 'http://localhost:8000/file.png');
+    assert.equal(safeArtifactUrl('http://evil.example.test/file.png', 'image'), undefined);
+    assert.equal(safeArtifactUrl('javascript:alert(1)', 'html'), undefined);
+    assert.equal(safeArtifactUrl('data:text/html,<script>alert(1)</script>', 'html'), undefined);
+    assert.equal(safeArtifactUrl('data:image/png;base64,AAAA', 'image'), 'data:image/png;base64,AAAA');
   });
 
   it('bounds untrusted artifact content and rejects unknown kinds', () => {
     const artifact = normalizeArtifact({ kind: 'unknown', content: 'x'.repeat(1_000_100) });
-    expect(artifact.kind).toBe('markdown');
-    expect(artifact.content).toHaveLength(1_000_000);
+    assert.equal(artifact.kind, 'markdown');
+    assert.equal(artifact.content.length, 1_000_000);
   });
 
   it('formats artifactText from content and structured json data', async () => {
     const { artifactText } = await import('./components/ArtifactCard');
     const codeArtifact = normalizeArtifact({ kind: 'code', content: 'console.log("hello")', language: 'typescript' });
-    expect(artifactText(codeArtifact)).toBe('console.log("hello")');
+    assert.equal(artifactText(codeArtifact), 'console.log("hello")');
 
     const jsonArtifact = normalizeArtifact({ kind: 'json', data: { model: 'makima', version: 2 } });
-    expect(artifactText(jsonArtifact)).toContain('"model": "makima"');
+    assert.ok(artifactText(jsonArtifact).includes('"model": "makima"'));
   });
 });
